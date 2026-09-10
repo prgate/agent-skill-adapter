@@ -18,14 +18,6 @@ dependencies = [
     "rich>=13.0.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "mypy>=1.13.0",
-    "pytest>=8.0.0",
-    "ruff>=0.8.0",
-    "types-pyyaml>=6.0.12.20240914",
-]
-
 [dependency-groups]
 dev = [
     "mypy>=1.13.0",
@@ -61,4 +53,3 @@ mypy_path = "src"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]

@@ -10,7 +10,7 @@ help: ## Show this help message
 
 .PHONY: install
 install: ## Install dependencies and package in editable mode
-	$(UV) sync --all-extras
+	$(UV) sync
 
 .PHONY: lint
 lint: ## Run linting and style checks
