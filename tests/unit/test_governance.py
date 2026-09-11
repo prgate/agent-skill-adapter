@@ -29,6 +29,10 @@ def test_agents_constitution_exists_and_line_limit() -> None:
         "Level 3",
         "Mandatory Git & Worktree Discipline",
         "Worktree Isolation",
+        "Branch Naming",
+        "Commit Format",
+        "PR-Only Delivery",
+        "Cleanup",
         "Language Policy",
     ]
     for clause in required_clauses:

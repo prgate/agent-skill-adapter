@@ -27,18 +27,19 @@
 
 ## 4. Cognitive Friction Protocol (CFP)
 - **Level 1 (Autonomous / Low Risk)**: Read files, search codebase, run read-only commands, run tests, plan edits.
-- **Level 2 (Notify / Medium Risk)**: Create new files, add/update dependencies. Log in summary.
+- **Level 2 (Notify / Medium Risk)**: Create new files, bump versions of already-declared dependencies. Log in summary.
 - **Level 3 (Force Stop / Critical Risk)**: Require explicit human confirmation before:
   - Deleting >3 files.
   - Modifying `.env`, secret configurations, or database migrations.
   - Executing `git push` to remote repositories.
+  - Adding a new third-party dependency (install-time code execution widens the supply-chain surface).
 
 ## 5. Mandatory Git & Worktree Discipline
-- **Worktree Isolation**: All work on non-main branches must occur in dedicated `.worktrees/<branch-name>` worktrees. The root directory must remain clean on `main`.
+- **Worktree Isolation**: All work on non-main branches must occur in a dedicated `.worktrees/<name>` worktree, where `<name>` is a short task slug (issue or PR number, e.g. `.worktrees/issue8`) — never the branch name, which contains `/`. The root directory must remain clean on `main`.
 - **Branch Naming**: Strict Conventional Branch format: `<type>/<kebab-case>` (`feature/`, `bugfix/`, `hotfix/`, `release/`, `chore/`).
 - **Commit Format**: Strict Conventional Commits: `<type>[(scope)]: <description>` (e.g., `feat(governance): add constitution`).
 - **PR-Only Delivery**: All changes must land on `main` via reviewed Pull Requests with passing CI.
-- **Cleanup**: Worktrees must be removed upon PR merge (`git worktree remove .worktrees/<branch-name>`).
+- **Cleanup**: Worktrees must be removed upon PR merge (`git worktree remove .worktrees/<name>`).
 
 ## 6. Language Policy
 - **Repository Artifacts**: Code, docstrings, comments, documentation, commit messages, and PR titles must be 100% English.
