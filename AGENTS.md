@@ -34,7 +34,7 @@
   - Executing `git push` to remote repositories.
 
 ## 5. Mandatory Git & Worktree Discipline
-- **Worktree Isolation**: All feature development must occur in dedicated `.worktrees/<branch-name>` worktrees. The root directory must remain clean on `main`.
+- **Worktree Isolation**: All work on non-main branches must occur in dedicated `.worktrees/<branch-name>` worktrees. The root directory must remain clean on `main`.
 - **Branch Naming**: Strict Conventional Branch format: `<type>/<kebab-case>` (`feature/`, `bugfix/`, `hotfix/`, `release/`, `chore/`).
 - **Commit Format**: Strict Conventional Commits: `<type>[(scope)]: <description>` (e.g., `feat(governance): add constitution`).
 - **PR-Only Delivery**: All changes must land on `main` via reviewed Pull Requests with passing CI.
