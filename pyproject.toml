@@ -25,6 +25,7 @@ agent-skill-adapter = "agent_skill_adapter.cli.main:app"
 [dependency-groups]
 dev = [
     "mypy>=1.13.0",
+    "pre-commit>=4.0.0",
     "pytest>=8.0.0",
     "ruff>=0.8.0",
     "types-pyyaml>=6.0.12.20240914",
