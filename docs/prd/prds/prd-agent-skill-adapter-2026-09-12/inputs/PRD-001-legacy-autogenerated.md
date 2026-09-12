@@ -1,10 +1,15 @@
-# PRD-001: Agent Skill Adapter
+# PRD-001: Agent Skill Adapter (архив)
+
+> **Документ вытеснен.** Действующий PRD — `docs/prd/PRD-001-agent-skill-adapter.md`.
+> Этот файл хранится как входной материал низкого доверия: часть утверждений
+> не подтверждается официальными спецификациями (разбор — в `../reconcile-legacy.md`).
+> Ссылаться на него как на требования нельзя.
 
 | Metadata | Details |
 | :--- | :--- |
 | **Document ID** | PRD-001 |
 | **Title** | Agent Skill Adapter — Universal Skill Compiler & Transpiler |
-| **Status** | Active / Approved |
+| **Status** | Archived / Superseded |
 | **Author** | PRGate Core Engineering Team |
 | **Created** | 2026-09-11 |
 | **Target Version** | v0.1.0 (MVP) — v1.0.0 (Production Multi-Provider) |
