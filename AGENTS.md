@@ -44,3 +44,10 @@
 ## 6. Language Policy
 - **Repository Artifacts**: Code, docstrings, comments, documentation, commit messages, and PR titles must be 100% English.
 - **User Dialogue**: Interactive chat responses and planning discussions should match the user's preferred language.
+
+## 7. Test Discipline
+- **Write a test only when it can fail on wrong behavior**: branching, format parsing, computation, a trust boundary, money or permissions, or a fixed bug (regression test). Such a test is mandatory.
+- **Do not test what is already visible**: file existence, a heading in a document, a plain getter, a library call with no logic of our own, a constant's value. Those tests catch no defects and turn documentation edits into test repair.
+- **Rule of thumb**: if a test can fail only from renaming or rewriting text, and not from incorrect code behavior, it is noise — do not write it.
+- **Minimum for nontrivial logic**: one runnable test, the smallest one that fails when the logic breaks. Not a suite per function, and no fixtures or frameworks beyond what the project already uses.
+- **Documentation is not pinned by tests**: the structure and content of documents are verified by reading them in review.
