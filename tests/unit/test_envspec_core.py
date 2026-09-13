@@ -164,7 +164,10 @@ def test_load_rejects_a_source_without_anchor_or_hash(tmp_path: Path, field: str
 
 
 def test_digest_is_equal_for_decomposed_and_composed_forms() -> None:
-    assert digest("café") == digest("café")
+    composed = "caf\u00e9"  # e with acute, one code point
+    decomposed = "cafe\u0301"  # plain e followed by a combining acute
+    assert composed != decomposed, "the two spellings must differ before hashing"
+    assert digest(composed) == digest(decomposed)
 
 
 def test_section_text_closes_a_fence_only_with_its_own_marker() -> None:
