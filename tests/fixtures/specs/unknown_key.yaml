@@ -1,0 +1,18 @@
+apiVersion: adapter.prgate.io/v1alpha1
+kind: EnvironmentSpec
+metadata:
+  name: demo
+  version: 1.0.0
+spec:
+  environment:
+    versions: ">=2.1.200,<2.2.0"
+  validForDays: 90
+  skillFields:
+    - name: context
+      kind: enum
+      values: [fork]
+      effect: Runs the skill in a forked context.
+      sinсe: "2.1.100"
+      provenance:
+        url: https://code.claude.com/docs/en/skills
+        anchor: "#frontmatter-reference"
