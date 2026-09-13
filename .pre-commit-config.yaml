@@ -1,28 +1,55 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        args: [--unsafe]
       - id: check-toml
+      - id: check-json
       - id: check-added-large-files
+        args: ['--maxkb=1000']
+        exclude: ^uv.lock$
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-symlinks
+      - id: detect-private-key
+      - id: no-commit-to-branch
+        args: [--branch, main]
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.6
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.49.0
     hooks:
-      - id: ruff-check
-        args: [--fix]
-      - id: ruff-format
+      - id: typos
+        args: [--force-exclude]
 
-  # Local hook: reuses the project's uv-managed environment and the strict
-  # mypy config in pyproject.toml instead of duplicating dependency pins in
-  # a mirrored hook's isolated venv.
+  # Local hooks: reuse the project's uv-managed environment and lockfile
+  # ensuring zero version drift and consistent lint/typecheck runs.
   - repo: local
     hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --force-exclude --fix --exit-non-zero-on-fix
+        language: system
+        types: [python]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format --force-exclude
+        language: system
+        types: [python]
+        require_serial: true
+
       - id: mypy
         name: mypy
         entry: uv run mypy src tests
         language: system
         pass_filenames: false
         types: [python]
+
+ci:
+  autofix_commit_msg: "chore(pre-commit): auto format from pre-commit.com hooks"
+  autoupdate_commit_msg: "chore(pre-commit): pre-commit autoupdate"
+  skip: [ruff-check, ruff-format, mypy]
