@@ -1,0 +1,743 @@
+# Google Antigravity 2.0 — target environment description.
+#
+# Every entry is taken from the official documentation at https://antigravity.google/docs/.
+# `support: unsupported` is used ONLY where the documentation states in words that something
+# is absent. Where the documentation is silent, the entry is `unknown` — silence is never
+# read as a denial.
+schema_version: 1
+vendor: google
+environment: antigravity
+version_range: ">=2.0.0,<3.0.0"
+checked_at: 2026-09-14
+stale_after_days: 30
+normalization: v1
+
+sources:
+  - id: skills-frontmatter
+    url: https://antigravity.google/docs/skills
+    markdown_url: https://antigravity.google/docs/skills.md
+    anchor: "Frontmatter fields"
+    sha256: "d3f5568882a4da47ef3b73629e251d2c5b84a9a23ce9db336a29ef4ea3d6fa64"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: skills-location
+    url: https://antigravity.google/docs/skills
+    markdown_url: https://antigravity.google/docs/skills.md
+    anchor: "Where skills live"
+    sha256: "cd92fb5e17f6664cbb17af1c21d409b5901ae5f8c63d589c98fa57e4642b8fc0"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: skills-structure
+    url: https://antigravity.google/docs/skills
+    markdown_url: https://antigravity.google/docs/skills.md
+    anchor: "Skill folder structure"
+    sha256: "f895005cfd0602be4dbe24364803ea8099572f620d5f129adf2a92b1beda1c04"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: subagents-frontmatter
+    url: https://antigravity.google/docs/subagents
+    markdown_url: https://antigravity.google/docs/subagents.md
+    anchor: "Frontmatter Configuration (YAML)"
+    sha256: "2e02826dad0961872f1e23099695f86e36a46f3d5064908622d543836eca5c30"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: subagents-location
+    url: https://antigravity.google/docs/subagents
+    markdown_url: https://antigravity.google/docs/subagents.md
+    anchor: "Agent Location and Discovery"
+    sha256: "070d5f0bb29ec6c3278db44e9f2a2725cf6c9a2fb80fc389ced6ac4704cfb118"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: subagents-prompt-body
+    url: https://antigravity.google/docs/subagents
+    markdown_url: https://antigravity.google/docs/subagents.md
+    anchor: "System Prompt & Markdown Body"
+    sha256: "84e24a73c066b46ae6a71e594cec9b961b02759957470b96ac3dc6239b00398d"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: subagents-nesting
+    url: https://antigravity.google/docs/subagents
+    markdown_url: https://antigravity.google/docs/subagents.md
+    anchor: "Inter-Agent Communication & Nesting Limits"
+    sha256: "c76bc88c431387b8d3f860010acbc00b568cd8bc160c5ea45af8fd793105e050"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: hooks-config
+    url: https://antigravity.google/docs/hooks
+    markdown_url: https://antigravity.google/docs/hooks.md
+    anchor: "Configuration"
+    sha256: "8bfe8f1723de8ae5a1bbf7362252a17f8b2b267c2a2bc011a5ff89abe9d7cf66"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: hooks-events
+    url: https://antigravity.google/docs/hooks
+    markdown_url: https://antigravity.google/docs/hooks.md
+    anchor: "Supported Events"
+    sha256: "1f6f5a39101c80a3a4ea96d7778c63676668f2482c9ead62311c9f7cb6a025e7"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: hooks-tools
+    url: https://antigravity.google/docs/hooks
+    markdown_url: https://antigravity.google/docs/hooks.md
+    anchor: "Supported Tools"
+    sha256: "576778fb44144e8d7a403d859c9304481246bed7b5ad1108d22b53540a87be6a"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: rules-overview
+    url: https://antigravity.google/docs/rules-workflows
+    markdown_url: https://antigravity.google/docs/rules-workflows.md
+    anchor: "Rules"
+    sha256: "bd1e0a3f80a77845542dfb8c6c2c6e8b7694cb716c8ce672c3937eae692dd92e"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: rules-global
+    url: https://antigravity.google/docs/rules-workflows
+    markdown_url: https://antigravity.google/docs/rules-workflows.md
+    anchor: "Global Rules"
+    sha256: "ea9b4a6c9aa35a0bffb883c22f89d62e377008054c3dabfb7e7276291c602be1"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: rules-workspace
+    url: https://antigravity.google/docs/rules-workflows
+    markdown_url: https://antigravity.google/docs/rules-workflows.md
+    anchor: "Workspace Rules"
+    sha256: "dd0031ee77921c9e63a64c7bff498755446fd226218eaeba1c20e0fb589b2417"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: plugins-structure
+    url: https://antigravity.google/docs/plugins
+    markdown_url: https://antigravity.google/docs/plugins.md
+    anchor: "Directory Structure"
+    sha256: "a270214d8443fbae5b90d464388d8b5a20fc0b895f1a08ef9a29bbfb037b09b2"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: plugins-manifest
+    url: https://antigravity.google/docs/plugins
+    markdown_url: https://antigravity.google/docs/plugins.md
+    anchor: "Manifest File (`plugin.json`)"
+    sha256: "141b0b461df13d6a21c32a366ac548184c9f96a0adc15a27d15b9a51fcfcb49e"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: plugins-locations
+    url: https://antigravity.google/docs/plugins
+    markdown_url: https://antigravity.google/docs/plugins.md
+    anchor: "How to Add Plugins"
+    sha256: "82abf5fe370544e4b61a50c7419fe17b03e83182bba6c4f52fce75a30c2718db"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: mcp-cli-configs
+    url: https://antigravity.google/docs/mcp
+    markdown_url: https://antigravity.google/docs/mcp.md
+    anchor: "Global and Workspace Server Configs"
+    sha256: "f958a847171654d8fb2c7e0fd813db74e17bce2788824bfed7a4e0f5df08b467"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: cli-settings-file
+    url: https://antigravity.google/docs/cli/settings
+    markdown_url: https://antigravity.google/docs/cli/settings.md
+    anchor: "Configuration file location"
+    sha256: "446a5b39dd051f90230c6a219d5bbdb5bd8853a29830ede775f7197700491223"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: cli-keybindings-file
+    url: https://antigravity.google/docs/cli/settings
+    markdown_url: https://antigravity.google/docs/cli/settings.md
+    anchor: "Keybindings file location"
+    sha256: "d9e9bd0259cf80c8c86db0f331516538f4329e34eb6fe81ce5ff0e653642786f"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+  - id: settings-categories
+    url: https://antigravity.google/docs/settings
+    markdown_url: https://antigravity.google/docs/settings.md
+    anchor: "The Four Settings Categories"
+    sha256: "9a753c25371240240f60ce685e97ec2a154511bb7540c2711ab1d2d03738b062"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
+
+capabilities:
+  # --- SKILL.md -------------------------------------------------------------
+  - id: skill.frontmatter.name
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "Optional; defaults to the folder name when omitted."
+  - id: skill.frontmatter.description
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "Required; this is what the agent sees when deciding whether to apply the skill."
+  - id: skill.frontmatter.allowed-tools
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: >-
+      The frontmatter table lists only `name` and `description`. It does not state that a
+      tool-restriction field is rejected or ignored, so this is silence, not a denial.
+  - id: skill.frontmatter.license
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.metadata
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.when_to_use
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.argument-hint
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.arguments
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.disable-model-invocation
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.user-invocable
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.disallowed-tools
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.model
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.effort
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.context
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.agent
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.background
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.hooks
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.paths
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.shell
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.frontmatter.compatibility
+    kind: skill-field
+    support: unknown
+    source_id: skills-frontmatter
+    note: "Not named by the frontmatter table; the page says nothing about it either way."
+  - id: skill.file.name
+    kind: skill-field
+    support: supported
+    source_id: skills-structure
+    note: "A skill is a folder whose only required file is `SKILL.md`."
+  - id: skill.bundled-resources
+    kind: skill-field
+    support: supported
+    source_id: skills-structure
+    note: "Optional `scripts/`, `examples/` and `resources/` subdirectories travel with the skill."
+
+  # --- Custom subagents (.md) ----------------------------------------------
+  - id: subagent.frontmatter.name
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "Required string; the unique identifier of the custom agent."
+  - id: subagent.frontmatter.description
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "Required string; used by the planner to decide when to delegate."
+  - id: subagent.frontmatter.tools
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "String list of permitted tools, spelled in Antigravity tool names."
+  - id: subagent.frontmatter.model
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "Model tier: `inherit`, `flash` or `pro`. Not a model identifier."
+  - id: subagent.frontmatter.color
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: "Not named by the frontmatter table, and not stated to be rejected."
+  - id: subagent.frontmatter.mainAgent
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "Boolean, default true; allows selection as the primary agent in chat interfaces."
+  - id: subagent.frontmatter.subagent
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "Boolean, default true; allows invocation through the `invoke_subagent` tool."
+  - id: subagent.frontmatter.commandExecutionPolicy
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "Shell auto-execution policy: `off`, `auto`, `eager` or `sandbox` (default `sandbox`)."
+  - id: subagent.frontmatter.mcpServers
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "Object list of MCP servers configured for this subagent."
+  - id: subagent.frontmatter.skills
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "String list of skill paths or plugin dependencies (`skills` / `plugins`)."
+  - id: subagent.frontmatter.disallowedTools
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: "Not named by the frontmatter property table, and not stated to be rejected."
+  - id: subagent.frontmatter.permissionMode
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: >-
+      Not named by the frontmatter property table. `commandExecutionPolicy` governs shell
+      auto-execution only; whether a broader permission mode exists is not stated.
+  - id: subagent.frontmatter.maxTurns
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: "Not named by the frontmatter property table, and not stated to be rejected."
+  - id: subagent.frontmatter.hooks
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: "Not named by the frontmatter property table, and not stated to be rejected."
+  - id: subagent.frontmatter.memory
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: "Not named by the frontmatter property table, and not stated to be rejected."
+  - id: subagent.frontmatter.background
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: "Not named by the frontmatter property table, and not stated to be rejected."
+  - id: subagent.frontmatter.effort
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: "Not named by the frontmatter property table, and not stated to be rejected."
+  - id: subagent.frontmatter.isolation
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: >-
+      Not a frontmatter property. Workspace isolation (`inherit`, `branch`, `share`) is
+      chosen per invocation by the caller, not declared in the agent file.
+  - id: subagent.frontmatter.initialPrompt
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: "Not named by the frontmatter property table, and not stated to be rejected."
+  - id: subagent.frontmatter.experimental
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-frontmatter
+    note: "Not named by the frontmatter property table, and not stated to be rejected."
+  - id: subagent.system-prompt-body
+    kind: subagent-field
+    support: supported
+    source_id: subagents-prompt-body
+    note: "Markdown after the closing `---` is the subagent system prompt."
+  # A ceiling measured in nesting levels, which `limits` cannot carry: its unit vocabulary
+  # is bytes / characters / tokens and is not widened (FR-32). Per decision D02 a ceiling of
+  # another nature is recorded as an ordinary capability with the number named in the note.
+  - id: subagent.limit.spawn-depth
+    kind: subagent-field
+    support: supported
+    source_id: subagents-nesting
+    note: >-
+      A maximum nesting depth of 10 levels of subagents beneath the primary agent is
+      strictly enforced, to prevent runaway recursion or resource exhaustion.
+  - id: subagent.limit.concurrent
+    kind: subagent-field
+    support: unknown
+    source_id: subagents-nesting
+    note: >-
+      The one ceiling this section states as strictly enforced is the nesting depth. It
+      names no cap on the number of concurrently running subagents, and rules none out.
+  # The tool-name mapping the adapter needs in order to rewrite `tools:`, `allowed-tools:`
+  # and hook matchers for this environment.
+  #
+  # Our own observation, which no single section asserts and therefore no hash guards: we
+  # read all 91 documentation pages listed in https://antigravity.google/llms.txt, and none
+  # of them pairs an Antigravity tool name with the tool name of another environment. The
+  # word "Claude" occurs only as a model name and in an FAQ answer about third-party
+  # clients. The note below stays inside what "Supported Tools" itself says.
+  - id: agent.tool-names.mapping
+    kind: subagent-field
+    support: unknown
+    source_id: hooks-tools
+    note: >-
+      This section names the twenty tool names a matcher can be written against —
+      `view_file`, `write_to_file`, `replace_file_content`, `multi_replace_file_content`,
+      `list_dir`, `find_by_name`, `grep_search`, `search_web`, `read_url_content`,
+      `run_command`, `manage_task`, `schedule`, `list_permissions`, `ask_permission`,
+      `invoke_subagent`, `define_subagent`, `send_message`, `manage_subagents`,
+      `ask_question`, `generate_image` — and pairs them with nothing: it gives the
+      Antigravity spelling of a tool, never the spelling any other environment uses.
+
+  # --- Hook events ----------------------------------------------------------
+  # The documented event set is PreToolUse, PostToolUse, PreInvocation, PostInvocation, Stop.
+  # Events the page does not name are recorded as `unknown`: the page enumerates what it
+  # supports, it never states that any other event is absent.
+  - id: hook.event.PreToolUse
+    kind: hook-event
+    support: supported
+    source_id: hooks-events
+    note: "Fires before a tool is executed; the matcher targets the tool name."
+  - id: hook.event.PostToolUse
+    kind: hook-event
+    support: supported
+    source_id: hooks-events
+    note: "Fires after a tool completes; the matcher targets the tool name."
+  - id: hook.event.Stop
+    kind: hook-event
+    support: supported
+    source_id: hooks-events
+    note: "Fires when the execution loop terminates; the matcher is ignored."
+  - id: hook.event.PreInvocation
+    kind: hook-event
+    support: supported
+    source_id: hooks-events
+    note: "Antigravity-specific: fires before the model is called; the matcher is ignored."
+  - id: hook.event.PostInvocation
+    kind: hook-event
+    support: supported
+    source_id: hooks-events
+    note: "Antigravity-specific: fires after each model invocation; the matcher is ignored."
+  - id: hook.event.UserPromptSubmit
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.SessionStart
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.SessionEnd
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.SubagentStop
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.Notification
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.PreCompact
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+
+  - id: hook.event.Setup
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.UserPromptExpansion
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.PermissionRequest
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.PermissionDenied
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.PostToolUseFailure
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.PostToolBatch
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.MessageDisplay
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.SubagentStart
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.TaskCreated
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.TaskCompleted
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.StopFailure
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.TeammateIdle
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.InstructionsLoaded
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.ConfigChange
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.CwdChanged
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.DirectoryAdded
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.FileChanged
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.WorktreeCreate
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.WorktreeRemove
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.PostCompact
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.PreModelSwitch
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.PostModelSwitch
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.Elicitation
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+  - id: hook.event.ElicitationResult
+    kind: hook-event
+    support: unknown
+    source_id: hooks-events
+    note: "Absent from the supported-events table; the page does not say it is unavailable."
+
+  # --- Configuration files --------------------------------------------------
+  - id: settings.file.hooks
+    kind: settings-file
+    support: supported
+    source_id: hooks-config
+    note: "`hooks.json` in the customization directory (`.agents/` or `~/.gemini/config/`)."
+  - id: settings.file.user
+    kind: settings-file
+    support: supported
+    source_id: cli-settings-file
+    note: >-
+      `~/.gemini/antigravity-cli/settings.json` — you, on this machine, in every workspace.
+      Written sparsely: only values that differ from the defaults reach disk.
+  - id: settings.file.cli-keybindings
+    kind: settings-file
+    support: supported
+    source_id: cli-keybindings-file
+    note: "`~/.gemini/antigravity-cli/keybindings.json` maps TUI actions to hotkey sequences."
+  - id: settings.file.plugin-manifest
+    kind: settings-file
+    support: supported
+    source_id: plugins-manifest
+    note: "`plugin.json` at the plugin root; the `name` field defaults to the directory name."
+  - id: settings.file.mcp-workspace
+    kind: settings-file
+    support: supported
+    source_id: mcp-cli-configs
+    note: "`.agents/mcp_config.json` in the active project."
+  - id: settings.file.mcp-global
+    kind: settings-file
+    support: supported
+    source_id: mcp-cli-configs
+    note: "`~/.gemini/config/mcp_config.json`."
+  - id: settings.file.plugin-hooks
+    kind: settings-file
+    support: supported
+    source_id: plugins-structure
+    note: "A plugin's own `hooks.json` at the plugin root, loaded while the plugin is active."
+  - id: settings.file.project
+    kind: settings-file
+    support: unknown
+    source_id: settings-categories
+    note: >-
+      Project settings are documented as a settings panel, not as a file. No checked-in,
+      project-scoped settings file is named, and the page does not say one is unavailable.
+  - id: settings.file.project-local
+    kind: settings-file
+    support: unknown
+    source_id: settings-categories
+    note: "No per-checkout, git-ignored settings override is named; nor is one ruled out."
+  - id: settings.file.managed
+    kind: settings-file
+    support: unknown
+    source_id: settings-categories
+    note: "No administrator-managed policy file is named on this page; nor is one ruled out."
+  - id: settings.skillListingBudgetFraction
+    kind: settings-file
+    support: unknown
+    source_id: settings-categories
+    note: >-
+      No setting that caps the share of the context window spent on the skill listing is
+      named among the four settings categories, and none is ruled out.
+  - id: settings.file.claude-json
+    kind: settings-file
+    support: unknown
+    source_id: settings-categories
+    note: >-
+      The counterpart topic is an app-state file the tool writes for itself (sign-in, MCP
+      servers, per-project state). The settings page names no such file either way.
+
+# Entry ids follow the vocabulary of the source environment description so that the two
+# layouts can be compared entry by entry. A root the documentation does not name simply
+# has no entry here — there is no such thing as an "unknown path".
+layout:
+  - id: skills.project
+    path: "<workspace-root>/.agents/skills/"
+    source_id: skills-location
+  - id: skills.user
+    path: "~/.gemini/config/skills/"
+    source_id: skills-location
+  - id: agents.project
+    path: ".agents/agents/"
+    source_id: subagents-location
+  - id: agents.user
+    path: "~/.gemini/config/agents/"
+    source_id: subagents-location
+  - id: agents.plugin
+    path: "plugins/<plugin_name>/agents/"
+    source_id: subagents-location
+  - id: hooks.project
+    path: ".agents/hooks.json"
+    source_id: hooks-config
+  - id: hooks.user
+    path: "~/.gemini/config/hooks.json"
+    source_id: hooks-config
+  - id: hooks.plugin
+    path: "plugins/<plugin-name>/hooks.json"
+    source_id: plugins-structure
+  - id: settings.user
+    path: "~/.gemini/antigravity-cli/settings.json"
+    source_id: cli-settings-file
+  # Roots with no counterpart in the source environment.
+  # `rules.*` is named after what the documentation calls it — global and workspace rules.
+  # It is not recorded as agent memory: no page says these files serve that role.
+  - id: rules.project
+    path: ".agents/rules/"
+    source_id: rules-workspace
+  - id: rules.user
+    path: "~/.gemini/GEMINI.md"
+    source_id: rules-global
+  - id: plugins.project
+    path: ".agents/plugins/"
+    source_id: plugins-locations
+  - id: plugins.user
+    path: "~/.gemini/config/plugins/"
+    source_id: plugins-locations
+  - id: mcp.project
+    path: ".agents/mcp_config.json"
+    source_id: mcp-cli-configs
+  - id: mcp.user
+    path: "~/.gemini/config/mcp_config.json"
+    source_id: mcp-cli-configs
+
+limits:
+  # The only size limit the documentation states in a unit: "Rules files are limited to
+  # 12,000 characters each." No skill file or skill bundle size limit is documented.
+  - id: rules.file.size
+    value: 12000
+    unit: characters
+    source_id: rules-overview
+
+# Empty, and that emptiness is itself a finding: see `agent.tool-names.mapping` above.
+# The documentation names the Antigravity tool set under "Supported Tools" but nowhere
+# states how a Claude Code tool name maps onto an Antigravity one — the word "Claude"
+# appears in it only as a model name and in an FAQ answer about third-party clients.
+# Pairing `Read` with `view_file` would be our guess, not the vendor's statement.
+tool_names: []
+
+# Only the source environment declares configuration the adapter cannot see (R28).
+invisible_sources: []
+
+# Written by the freshness check, never by hand.
+discrepancies: []
