@@ -1,7 +1,8 @@
 # Environment Spec Format and Claude Code Spec 1.0.0 — Design
 
 - Issue: #2 (scope narrowed, see "Scope")
-- PRD requirements covered: FR-1, FR-2, FR-3, FR-4, FR-5, FR-9, FR-11 (source half), FR-12, FR-15 (YAML safety), FR-17, FR-29, FR-32, FR-48 (groundwork)
+- PRD requirements covered: FR-1, FR-2, FR-3, FR-4, FR-5, FR-9, FR-11 (source half), FR-12, FR-13 (layout half), FR-15 (YAML safety), FR-17, FR-29, FR-32, FR-48 (groundwork)
+- Baseline: the open Agent Skills specification, https://github.com/agentskills/agentskills
 - Status: approved design, implementation pending
 
 ## 1. Problem
@@ -12,8 +13,12 @@ limits, invisible configuration sources), where each record cites the official
 documentation it was taken from. No such format exists yet, and there is no
 loader that reads it deterministically. Issue #2 asks for the Anthropic spec; the
 PRD (§1, FR-11) makes clear the source environment is **Claude Code** — the open
-Agent Skills spec covers only `name` and `description`, and the product's value
-lies in the Claude Code extensions on top of it.
+Agent Skills spec ([agentskills.io](https://agentskills.io), repo
+[agentskills/agentskills](https://github.com/agentskills/agentskills)) defines
+six frontmatter fields — `name`, `description`, `license`, `compatibility`,
+`metadata`, `allowed-tools` — and the product's value lies in the Claude Code
+extensions on top of them (`context`, `hooks`, `model`, …). The PRD's "two
+fields" count in §1 is stale; the argument is unchanged.
 
 ## 2. Decisions
 
@@ -25,6 +30,9 @@ lies in the Claude Code extensions on top of it.
 | D4 | **Pydantic models are the source of truth**; JSON Schema is generated from them and committed | Hand-written JSON Schema + `jsonschema` lib; or bare `yaml.safe_load` | One truth, typed object for the core, editor validation for authors, zero new dependencies |
 | D5 | **Kubernetes-style manifest envelope** (`apiVersion`, `kind`, `metadata`, `spec`, `status`) | Flat document with `format_version` / `spec_version` | One envelope for specs, contracts (#4) and reports (FR-24); `spec` vs `status` separates human-authored content from machine-observed drift (FR-8); `v1alpha1` states honestly that the format is still moving |
 | D6 | Path is `specs/claude-code/`, not `specs/anthropic/` as in the issue | Keep issue path | Environments are named by product; Anthropic may ship more than one |
+| D7 | The open Agent Skills spec is a **third environment spec**, `specs/agentskills/1.0.0/`, `labels.role: baseline`, in scope of #2 | Hard-code the portable field list | Portability must be checkable against a cited source, and the baseline is the common denominator for every future target |
+| D8 | `portable` is **derived** by the loader (`name` present in the baseline named by `spec.extends`), not authored | Hand-maintained `portable: bool` | A hand flag drifts silently; derivation is one set lookup and is tested |
+| D9 | Record constraints, stability, limit enforcement, unknown-field policy and directory layout are **fields of the format** | Prose in `effect` | The open spec states hard constraints (`name` ≤ 64, regex, equals directory), soft limits (< 500 lines), an experimental field, and a strict reference validator; the core must branch on these, so they must be data |
 
 ## 3. Layout
 
@@ -32,6 +40,11 @@ lies in the Claude Code extensions on top of it.
 specs/
   schema/
     environmentspec.v1alpha1.json    # generated from Pydantic; one file per (apiVersion, kind)
+  agentskills/
+    1.0.0/
+      spec.yaml                      # baseline: the open Agent Skills spec, pinned to a repo commit
+    CHANGELOG.md
+    versions.lock
   claude-code/
     1.0.0/
       spec.yaml                      # one resource per file, no `---`
@@ -62,19 +75,50 @@ metadata:
   annotations:
     adapter.prgate.io/changelog: CHANGELOG.md
 spec:                                # desired state — authored by humans (LLM draft, human review; FR-10)
+  extends: agentskills@1.0.0         # baseline spec; absent on the baseline itself
   environment:
-    versions: ">=2.1.200,<2.2.0"     # environment version range (FR-3)
+    versions: ">=2.1.200,<2.2.0"     # environment version range (FR-3); "*" on the baseline
   validForDays: 90                   # after checkedAt + validForDays the spec is stale (FR-9)
+  frontmatter:
+    unknownFields: warn              # reject | warn | ignore — what the environment does with a key it does not know
+    provenance: {…}
+  layout:                            # where skills live (FR-13); each entry carries provenance
+    skillFile: [SKILL.md, skill.md]
+    skillsDirs:
+      - {path: .claude/skills, scope: project}
+      - {path: .agents/skills, scope: project}
+      - {path: ~/.claude/skills, scope: user}
+    conventionalDirs: [scripts, references, assets]
   skillFields:
-    - name: context                  # frontmatter key verbatim
-      kind: enum                     # string | bool | int | enum | list[string] | map
+    - name: name                     # frontmatter key verbatim
+      kind: string                   # string | bool | int | enum | list[string] | map
+      required: true
+      constraints:                   # optional; only what the documentation states
+        minLength: 1
+        maxLength: 64
+        pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+        matchesDirectoryName: true
+      stability: stable              # stable | experimental
+      since: null                    # first environment version with this field; null = always
+      effect: Identifies the skill; loaded into the catalog at session start.
+      provenance: {…}
+    - name: metadata
+      kind: map
+      valueKind: string              # map only
+      openKeys: true                 # map only: arbitrary keys allowed
+      required: false
+      stability: stable
+      effect: Client-specific properties outside the open spec.
+      provenance: {…}
+    - name: context
+      kind: enum
       values: [fork]                 # enum only
       required: false
-      since: "2.1.100"               # first environment version with this field; null = always
-      portable: false                # part of the open agentskills.io spec?
+      stability: stable
+      since: "2.1.100"
       effect: Runs the skill in a forked context; conversation history is not shared.
       provenance:
-        url: https://docs.anthropic.com/.../skills
+        url: https://code.claude.com/docs/en/skills
         anchor: "#context"           # exactly one of anchor | selector
         hash: sha256:9f2a…           # sha256 of the normalized section text
         checkedAt: 2026-09-13
@@ -84,9 +128,10 @@ spec:                                # desired state — authored by humans (LLM
     - name: Bash
       provenance: {…}
   limits:
-    - name: skill_file_size
-      value: 15000
-      unit: bytes                    # bytes | chars | tokens (FR-32)
+    - name: skill_file_lines
+      value: 500
+      unit: lines                    # bytes | chars | tokens | lines (FR-32)
+      enforcement: recommended       # hard | recommended
       provenance: {…}
   invisibleSources:                  # FR-17
     - path: ~/.claude/settings.json
@@ -120,9 +165,23 @@ nothing here needs them.
 
 Record semantics:
 
-- `portable: false` marks a Claude Code extension over the open spec. The set
-  of such records is the raw material of the FR-48 gap list: each one needs a
-  decision in the mapping contract (#4).
+- **Portability is derived, not authored.** `spec.extends` names the baseline
+  (`agentskills@1.0.0`); the loader marks a `skillFields` record portable when a
+  record with the same `name` exists in the baseline. Records that are not
+  portable are the raw material of the FR-48 gap list: each one needs a
+  decision in the mapping contract (#4). The baseline's `metadata` map
+  (`openKeys: true`) is the open spec's official extension point and the
+  obvious lowering target for those fields — a contract decision, recorded
+  here only as a fact about the baseline.
+- `constraints` carries only what the documentation states (length, pattern,
+  directory match); `stability: experimental` marks fields the spec itself
+  flags as unstable (`allowed-tools`). `limits[].enforcement` separates a hard
+  limit from a recommendation (the open spec's "< 500 lines" is a
+  recommendation; a target may make it hard).
+- `frontmatter.unknownFields` records what the environment does with a key it
+  does not know. The open spec's reference validator (`skills-ref`) rejects
+  unknown keys; its client guide recommends warn-and-load. Both are cited; the
+  baseline records the validator's behavior.
 - `effect` is for humans and for the report ("what is lost"); the core never
   branches on it.
 - There is **no support status** on a source record. Support is a property of
@@ -185,6 +244,10 @@ Validators:
 - `name` unique within each list.
 - `kind: enum` requires non-empty `values`; every other kind forbids `values`.
 - exactly one of `provenance.anchor` / `provenance.selector`.
+- `kind: map` requires `valueKind`; every other kind forbids `valueKind` and `openKeys`.
+- `spec.extends`, when present, must resolve to an existing spec directory
+  (`specs/<name>/<version>/spec.yaml`) whose `labels.role` is `baseline`; the
+  baseline itself has no `extends`.
 
 **`loader.py`**:
 
@@ -205,6 +268,8 @@ Validators:
   staleness test is nondeterministic.
 - `dump_manifest(m) -> str` — canonical YAML: keys in model order, `name`-keyed
   lists sorted by `name`, `\n` line endings, UTF-8, no anchors/aliases.
+- `portable_fields(m, baseline) -> frozenset[str]` — names of `skillFields`
+  present in both; the derived `portable` flag of D8.
 
 Version range comparison: `packaging` is not a runtime dependency of the
 project, so a minimal comparator over dotted integers with `>=`, `>`, `<`, `<=`,
@@ -224,22 +289,50 @@ Only tests that fail on wrong behavior:
 
 | Test | Catches |
 |------|---------|
-| `specs/claude-code/1.0.0/spec.yaml` loads | a broken spec in the repo |
-| duplicate `name`, unknown key, `enum` without `values`, `version` ≠ directory → `SpecLoadError` with `loc` | silent swallowing |
+| `specs/claude-code/1.0.0/spec.yaml` and `specs/agentskills/1.0.0/spec.yaml` load; `extends` resolves | a broken spec in the repo |
+| duplicate `name`, unknown key, `enum` without `values`, `map` without `valueKind`, `version` ≠ directory, `extends` to a non-baseline → `SpecLoadError` with `loc` | silent swallowing |
+| `portable_fields`: `name` in, `context` out | wrong derivation of the gap list |
 | `select_spec`: 0 / 1 / 2 matches, `pinned`, stale by date, stale by `status` | FR-4, FR-5, FR-9 |
 | `dump_manifest(load_manifest(x)) == x` for 1.0.0 | non-deterministic serialization |
 | HTML normalization: different markup, same text → same hash; different text → different hash | the hash contract |
 | committed JSON Schema == generated | schema and models drifting apart |
-| `versions.lock`: hash of `1.0.0/` unchanged | immutability violation (FR-5) |
+| `versions.lock`: hash of each published directory unchanged | immutability violation (FR-5) |
 
 Fixtures in `tests/fixtures/specs/`: one minimal broken manifest per error. The
-only valid fixture is the real `specs/claude-code/1.0.0/spec.yaml`. Tests never
+only valid fixtures are the real specs under `specs/`. Tests never
 touch the network.
 
-## 8. Contents of Claude Code spec 1.0.0
+## 8. Contents of the 1.0.0 specs
 
-Taken from the official Claude Code documentation at the time of writing, each
-with provenance:
+### Baseline — `specs/agentskills/1.0.0/spec.yaml`
+
+Source: `docs/specification.mdx` and `skills-ref/src/skills_ref/validator.py`
+in [agentskills/agentskills](https://github.com/agentskills/agentskills),
+pinned to one commit; provenance URLs point at `raw.githubusercontent.com`
+blobs of that commit plus the rendered page on agentskills.io. The repo has no
+tags, so `metadata.annotations.adapter.prgate.io/upstream-commit` records the
+SHA.
+
+- **skillFields** — `name` (required; 1–64, `^[a-z0-9]+(-[a-z0-9]+)*$`,
+  equals directory), `description` (required; 1–1024), `license`,
+  `compatibility` (1–500), `metadata` (`map`, `valueKind: string`,
+  `openKeys: true`), `allowed-tools` (`experimental`; space-separated tool
+  patterns).
+- **frontmatter.unknownFields** — `reject` (reference validator
+  `ALLOWED_FIELDS`).
+- **layout** — `skillFile: [SKILL.md, skill.md]`; `skillsDirs`:
+  `.agents/skills` (project), `~/.agents/skills` (user);
+  `conventionalDirs: [scripts, references, assets]`.
+- **limits** — `skill_file_lines` 500 (recommended), `skill_body_tokens` 5000
+  (recommended), `catalog_entry_tokens` 100 (recommended).
+- **tools**, **invisibleSources** — empty: the open spec names no tools and no
+  out-of-repo configuration.
+
+### Claude Code — `specs/claude-code/1.0.0/spec.yaml`
+
+`extends: agentskills@1.0.0`. Taken from the official Claude Code
+documentation (`code.claude.com/docs/en/skills` and neighbours) at the time of
+writing, each record with provenance:
 
 - **skillFields** — every frontmatter key Claude Code documents for
   `SKILL.md` (the PRD counts eighteen: `name`, `description`, `allowed-tools`,
@@ -252,25 +345,29 @@ with provenance:
   total volume, where documented, with explicit units.
 - **invisibleSources** — `~/.claude/settings.json`, `~/.claude/CLAUDE.md`,
   enterprise managed policy files.
+- **frontmatter.unknownFields** and **layout** — as documented
+  (`.claude/skills`, `.agents/skills`, user-level equivalents).
 
 ## 9. Scope
 
-In: everything in §3–§8, `Makefile` target `spec-schema`, a comment on issue #2
+In: everything in §3–§8 including the baseline spec, `Makefile` target `spec-schema`, a comment on issue #2
 recording the path rename (D6) and the narrowed coverage (D3).
 
 Out: subagent fields (1.1.0), hooks (1.2.0), the FR-7 CI step and FR-8
 auto-PR, `ContractRegistry`, Markdown body parsing, drift significance
-threshold (§5), any target-environment or contract work (#3, #4).
+threshold (§5), any target-environment or contract work (#3, #4), running
+`skills-ref validate` against adapter output (belongs to FR-43 / #4),
+`strictyaml` as a dependency (FR-15 rules are implemented over
+`yaml.safe_load`).
 
 ## 10. Files
 
-- `specs/claude-code/1.0.0/spec.yaml`
-- `specs/claude-code/CHANGELOG.md`
-- `specs/claude-code/versions.lock`
+- `specs/agentskills/1.0.0/spec.yaml`, `specs/agentskills/CHANGELOG.md`, `specs/agentskills/versions.lock`
+- `specs/claude-code/1.0.0/spec.yaml`, `specs/claude-code/CHANGELOG.md`, `specs/claude-code/versions.lock`
 - `specs/schema/environmentspec.v1alpha1.json`
 - `src/agent_skill_adapter/specs/__init__.py`, `models.py`, `loader.py`
 - `scripts/spec_provenance.py`
 - `tests/unit/test_specs.py`, `tests/fixtures/specs/*.yaml`
 - `Makefile` (+ `spec-schema`)
 
-Estimate: ~2 days, half of it reading documentation and filling 1.0.0.
+Estimate: ~2.5 days, half of it reading documentation and filling the two 1.0.0 specs.
