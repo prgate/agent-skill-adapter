@@ -36,3 +36,10 @@ htmlcov/
 .vscode/
 *.swp
 *~
+
+# AI
+.omc
+.agents
+.claude
+.hermes
+.zcode
