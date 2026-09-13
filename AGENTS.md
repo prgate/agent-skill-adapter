@@ -51,3 +51,27 @@
 - **Rule of thumb**: if a test can fail only from renaming or rewriting text, and not from incorrect code behavior, it is noise — do not write it.
 - **Minimum for nontrivial logic**: one runnable test, the smallest one that fails when the logic breaks. Not a suite per function, and no fixtures or frameworks beyond what the project already uses.
 - **Documentation is not pinned by tests**: the structure and content of documents are verified by reading them in review.
+
+<!-- autopilot:start -->
+## Agent Skill Adapter — Autopilot Notes
+
+Adapter that moves Claude Code agent configuration into Google Antigravity and reports what
+is lost in transit. Offline, deterministic. For skill authors and CI.
+
+### Commands
+
+| Command | Purpose |
+|---------|---------|
+| `make install` | Install dependencies and dev tools |
+| `make check` | Lint, typecheck, tests |
+| `make test` | Run the test suite |
+
+### How Autopilot works here
+
+Сборка ведётся навыком `/autopilot`. Требования, спецификация и таски — в `.autopilot/`.
+Прогресс — `.autopilot/dashboard.html`. Правило: требование из `manifest.md`
+может снять только пользователь.
+
+Если работа продолжается — скажи «продолжи автопилот»: состояние поднимется
+из `.autopilot/state.js`, переспрашивать ничего не нужно.
+<!-- autopilot:end -->
