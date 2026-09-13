@@ -13,6 +13,7 @@ from agent_skill_adapter.specs.loader import (
     SpecLoadError,
     StaleSpecError,
     UnsupportedManifestError,
+    directory_hash,
     dump_manifest,
     load_manifest,
     portable_fields,
@@ -352,3 +353,37 @@ def test_published_portability_is_derived() -> None:
     assert "name" in portable
     assert "context" not in portable
     assert "hooks" not in portable
+
+
+LOCKS = sorted(SPECS.glob("*/versions.lock"))
+
+
+def read_lock(path: Path) -> dict[str, str]:
+    """Parse a versions.lock file, ignoring comment and blank lines."""
+    entries: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        version, digest = stripped.split()
+        entries[version] = digest
+    return entries
+
+
+def test_every_published_environment_has_a_lock() -> None:
+    environments = {p.parent.parent.name for p in SPECS.glob("*/*/spec.yaml")}
+    locked = {p.parent.name for p in LOCKS}
+    assert environments == locked, f"unlocked environments: {sorted(environments - locked)}"
+
+
+@pytest.mark.parametrize("lock_path", LOCKS)
+def test_published_versions_are_immutable(lock_path: Path) -> None:
+    """A published version directory must never change (FR-5); publish a new one instead."""
+    entries = read_lock(lock_path)
+    assert entries, f"{lock_path} must pin at least one published version"
+    for version, digest in entries.items():
+        directory = lock_path.parent / version
+        assert directory.is_dir(), f"{lock_path} pins missing directory {version}"
+        assert directory_hash(directory) == digest, (
+            f"{directory} changed after publication; publish a new version directory instead"
+        )

@@ -1,0 +1,5 @@
+# sha256 of each published spec version directory. A published directory is
+# immutable: to correct a record, publish a new version next to it.
+# Regenerate after publishing a new version with:
+#   uv run python -c "from pathlib import Path; from agent_skill_adapter.specs.loader import directory_hash; print(directory_hash(Path('specs/<env>/<version>')))"
+1.0.0 sha256:7a2dfdb7033e80d70a725ab3d8f55d03791d7e2d7a4d27658bd5d9e6ae54838d
