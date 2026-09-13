@@ -27,4 +27,3 @@ make check
 
 - [Documentation Hub](docs/README.md)
 - [PRD-001: Agent Skill Adapter](docs/prd/PRD-001-agent-skill-adapter.md)
-

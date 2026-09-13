@@ -30,3 +30,11 @@ test: ## Run unit tests
 check: lint ## Run all quality gates (lint, typecheck, test)
 	$(UV) run mypy src tests
 	$(UV) run pytest
+
+.PHONY: pre-commit-install
+pre-commit-install: ## Install git hooks via pre-commit
+	$(UV) run pre-commit install
+
+.PHONY: pre-commit-run
+pre-commit-run: ## Run pre-commit hooks against all files
+	$(UV) run pre-commit run --all-files
