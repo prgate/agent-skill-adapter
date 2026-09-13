@@ -332,3 +332,23 @@ def test_published_records_carry_provenance_hashes(spec_path: Path) -> None:
         provenances.append(("layout", spec.layout.provenance))
     missing = [name for name, provenance in provenances if provenance.hash is None]
     assert not missing, f"{spec_path}: records without a provenance hash: {missing}"
+
+
+CLAUDE_CODE_1_0_0 = SPECS / "claude-code" / "1.0.0" / "spec.yaml"
+
+
+def test_published_claude_code_spec_extends_the_baseline() -> None:
+    manifest = load_manifest(CLAUDE_CODE_1_0_0)
+    assert manifest.spec.extends == "agentskills@1.0.0"
+    assert manifest.spec.tools, "1.0.0 must record tool names"
+
+
+def test_published_portability_is_derived() -> None:
+    """`name` is in the open spec, `context` is a Claude Code extension (FR-48)."""
+    manifest = load_manifest(CLAUDE_CODE_1_0_0)
+    baseline = resolve_baseline(manifest, SPECS)
+    assert baseline is not None
+    portable = portable_fields(manifest, baseline)
+    assert "name" in portable
+    assert "context" not in portable
+    assert "hooks" not in portable
