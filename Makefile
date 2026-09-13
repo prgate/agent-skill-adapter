@@ -22,6 +22,14 @@ format: ## Automatically format and fix code style
 	$(UV) run ruff check --fix .
 	$(UV) run ruff format .
 
+.PHONY: spec-schema
+spec-schema: ## Regenerate the manifest JSON Schema from the Pydantic models
+	$(UV) run python -c "from pathlib import Path; \
+from agent_skill_adapter.specs.models import json_schema_text; \
+p = Path('specs/schema/environmentspec.v1alpha1.json'); \
+p.parent.mkdir(parents=True, exist_ok=True); \
+p.write_text(json_schema_text(), encoding='utf-8')"
+
 .PHONY: test
 test: ## Run unit tests
 	$(UV) run pytest

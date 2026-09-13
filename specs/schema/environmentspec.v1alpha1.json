@@ -1,0 +1,660 @@
+{
+  "$defs": {
+    "DriftEntry": {
+      "additionalProperties": false,
+      "description": "One record whose source section no longer matches its recorded hash.",
+      "properties": {
+        "actual": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actual"
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "record": {
+          "title": "Record",
+          "type": "string"
+        }
+      },
+      "required": [
+        "record",
+        "reason"
+      ],
+      "title": "DriftEntry",
+      "type": "object"
+    },
+    "EnvironmentRef": {
+      "additionalProperties": false,
+      "description": "The environment version range this document describes.",
+      "properties": {
+        "versions": {
+          "title": "Versions",
+          "type": "string"
+        }
+      },
+      "required": [
+        "versions"
+      ],
+      "title": "EnvironmentRef",
+      "type": "object"
+    },
+    "EnvironmentSpec": {
+      "additionalProperties": false,
+      "description": "Desired state: the human-authored content of the document.",
+      "properties": {
+        "agentFields": {
+          "items": {
+            "$ref": "#/$defs/FieldRecord"
+          },
+          "title": "Agentfields",
+          "type": "array"
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentRef"
+        },
+        "extends": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extends"
+        },
+        "frontmatter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrontmatterPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hooks": {
+          "items": {
+            "$ref": "#/$defs/FieldRecord"
+          },
+          "title": "Hooks",
+          "type": "array"
+        },
+        "invisibleSources": {
+          "items": {
+            "$ref": "#/$defs/InvisibleSource"
+          },
+          "title": "Invisiblesources",
+          "type": "array"
+        },
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Layout"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limits": {
+          "items": {
+            "$ref": "#/$defs/LimitRecord"
+          },
+          "title": "Limits",
+          "type": "array"
+        },
+        "skillFields": {
+          "items": {
+            "$ref": "#/$defs/FieldRecord"
+          },
+          "title": "Skillfields",
+          "type": "array"
+        },
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/ToolRecord"
+          },
+          "title": "Tools",
+          "type": "array"
+        },
+        "validForDays": {
+          "title": "Validfordays",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "environment",
+        "validForDays"
+      ],
+      "title": "EnvironmentSpec",
+      "type": "object"
+    },
+    "FieldConstraints": {
+      "additionalProperties": false,
+      "description": "Only what the source documentation states about a field's value.",
+      "properties": {
+        "matchesDirectoryName": {
+          "default": false,
+          "title": "Matchesdirectoryname",
+          "type": "boolean"
+        },
+        "maxLength": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maxlength"
+        },
+        "minLength": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minlength"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pattern"
+        }
+      },
+      "title": "FieldConstraints",
+      "type": "object"
+    },
+    "FieldRecord": {
+      "additionalProperties": false,
+      "description": "One frontmatter key the environment understands.",
+      "properties": {
+        "constraints": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldConstraints"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "effect": {
+          "title": "Effect",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "string",
+            "bool",
+            "int",
+            "enum",
+            "list[string]",
+            "map"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "openKeys": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Openkeys"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since"
+        },
+        "stability": {
+          "default": "stable",
+          "enum": [
+            "stable",
+            "experimental"
+          ],
+          "title": "Stability",
+          "type": "string"
+        },
+        "valueKind": {
+          "anyOf": [
+            {
+              "enum": [
+                "string",
+                "bool",
+                "int",
+                "enum",
+                "list[string]",
+                "map"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valuekind"
+        },
+        "values": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "effect",
+        "provenance"
+      ],
+      "title": "FieldRecord",
+      "type": "object"
+    },
+    "FrontmatterPolicy": {
+      "additionalProperties": false,
+      "description": "What the environment does with a frontmatter key it does not know.",
+      "properties": {
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "unknownFields": {
+          "enum": [
+            "reject",
+            "warn",
+            "ignore"
+          ],
+          "title": "Unknownfields",
+          "type": "string"
+        }
+      },
+      "required": [
+        "unknownFields",
+        "provenance"
+      ],
+      "title": "FrontmatterPolicy",
+      "type": "object"
+    },
+    "InvisibleSource": {
+      "additionalProperties": false,
+      "description": "Configuration the environment reads from outside the repository.",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason",
+        "provenance"
+      ],
+      "title": "InvisibleSource",
+      "type": "object"
+    },
+    "Layout": {
+      "additionalProperties": false,
+      "description": "Where skills live on disk (FR-13).",
+      "properties": {
+        "conventionalDirs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Conventionaldirs",
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "skillFile": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skillfile",
+          "type": "array"
+        },
+        "skillsDirs": {
+          "items": {
+            "$ref": "#/$defs/SkillsDir"
+          },
+          "title": "Skillsdirs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "skillFile",
+        "provenance"
+      ],
+      "title": "Layout",
+      "type": "object"
+    },
+    "LimitRecord": {
+      "additionalProperties": false,
+      "description": "One documented size limit, with an explicit unit and how hard it is.",
+      "properties": {
+        "enforcement": {
+          "enum": [
+            "hard",
+            "recommended"
+          ],
+          "title": "Enforcement",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "unit": {
+          "enum": [
+            "bytes",
+            "chars",
+            "tokens",
+            "lines"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "unit",
+        "enforcement",
+        "provenance"
+      ],
+      "title": "LimitRecord",
+      "type": "object"
+    },
+    "Metadata": {
+      "additionalProperties": false,
+      "description": "Manifest identity. `labels.role` is one of baseline | source | target | both.",
+      "properties": {
+        "annotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Annotations",
+          "type": "object"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "Metadata",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "Where a record was read from, and the hash of that section's text.",
+      "properties": {
+        "anchor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Anchor"
+        },
+        "checkedAt": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkedat"
+        },
+        "hash": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hash"
+        },
+        "selector": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selector"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "SkillsDir": {
+      "additionalProperties": false,
+      "description": "One directory the environment scans for skills.",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "project",
+            "user",
+            "enterprise"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "scope"
+      ],
+      "title": "SkillsDir",
+      "type": "object"
+    },
+    "Status": {
+      "additionalProperties": false,
+      "description": "Observed state: written only by the provenance script.",
+      "properties": {
+        "drift": {
+          "items": {
+            "$ref": "#/$defs/DriftEntry"
+          },
+          "title": "Drift",
+          "type": "array"
+        },
+        "stale": {
+          "default": false,
+          "title": "Stale",
+          "type": "boolean"
+        },
+        "verifiedAt": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verifiedat"
+        }
+      },
+      "title": "Status",
+      "type": "object"
+    },
+    "ToolRecord": {
+      "additionalProperties": false,
+      "description": "One tool name the environment documents.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        }
+      },
+      "required": [
+        "name",
+        "provenance"
+      ],
+      "title": "ToolRecord",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The manifest envelope.",
+  "properties": {
+    "apiVersion": {
+      "const": "adapter.prgate.io/v1alpha1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "EnvironmentSpec",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/EnvironmentSpec"
+    },
+    "status": {
+      "$ref": "#/$defs/Status",
+      "default": {
+        "drift": [],
+        "stale": false,
+        "verifiedAt": null
+      }
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "title": "Manifest",
+  "type": "object"
+}
