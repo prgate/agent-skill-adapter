@@ -148,5 +148,6 @@ spec:
       checkedAt: 2026-09-13
   invisibleSources: []
 status:
+  verifiedAt: 2026-09-13
   stale: false
   drift: []

@@ -594,5 +594,6 @@ spec:
       hash: sha256:1a7e53be114135a9559035b65b8829dfdb6e2bf918ede33f440db907f1057433
       checkedAt: 2026-09-13
 status:
+  verifiedAt: 2026-09-13
   stale: false
   drift: []
