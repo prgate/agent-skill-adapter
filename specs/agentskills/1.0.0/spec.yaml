@@ -1,0 +1,152 @@
+apiVersion: adapter.prgate.io/v1alpha1
+kind: EnvironmentSpec
+metadata:
+  name: agentskills
+  version: 1.0.0
+  labels:
+    vendor: agentskills
+    role: baseline
+  annotations:
+    adapter.prgate.io/changelog: CHANGELOG.md
+    adapter.prgate.io/upstream-commit: 69ef37e9424c0a7ea9dd2293b559e43ec8176379
+spec:
+  environment:
+    versions: '*'
+  validForDays: 90
+  frontmatter:
+    unknownFields: reject
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#validation'
+      hash: sha256:18e9353003961afef0a5af7ad3c5e466616f02de29eeffe79bff9b1acd72d898
+      checkedAt: 2026-09-13
+  layout:
+    skillFile:
+    - SKILL.md
+    skillsDirs: []
+    conventionalDirs:
+    - scripts
+    - references
+    - assets
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#directory-structure'
+      hash: sha256:66a95314efe85ea6a07cf0690422c61e44555e6f286ea4aefd53d73d96f6d233
+      checkedAt: 2026-09-13
+  skillFields:
+  - name: allowed-tools
+    kind: string
+    values: []
+    required: false
+    stability: experimental
+    effect: Space-separated tool patterns the skill may use without approval.
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#allowed-tools-field'
+      hash: sha256:08f1b9e7eef6673da5aa1a19fbd4ffe73d63e8d655ab9e7bc172014a374d82ce
+      checkedAt: 2026-09-13
+  - name: compatibility
+    kind: string
+    values: []
+    required: false
+    constraints:
+      minLength: 1
+      maxLength: 500
+      matchesDirectoryName: false
+    stability: stable
+    effect: States environment requirements, such as intended product, system packages, or network access.
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#compatibility-field'
+      hash: sha256:6ce9731dc6204f53c95486dc4193d093f79c7da1ab763903a9ddfc3406f4cc25
+      checkedAt: 2026-09-13
+  - name: description
+    kind: string
+    values: []
+    required: true
+    constraints:
+      minLength: 1
+      maxLength: 1024
+      matchesDirectoryName: false
+    stability: stable
+    effect: Describes what the skill does and when to use it; loaded into the catalog at session start.
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#description-field'
+      hash: sha256:e2416f0bc92faca383c0d1a6f0e6d8a9fc46ff651a49f5a312fa82079c83e028
+      checkedAt: 2026-09-13
+  - name: license
+    kind: string
+    values: []
+    required: false
+    stability: stable
+    effect: Names the license covering the skill, or a bundled license file.
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#license-field'
+      hash: sha256:2b885d534387ce477e5a5b80a6755e23fac0959a2bd4011b332157ff5172c45b
+      checkedAt: 2026-09-13
+  - name: metadata
+    kind: map
+    values: []
+    valueKind: string
+    openKeys: true
+    required: false
+    stability: stable
+    effect: Client-specific properties outside the open spec.
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#metadata-field'
+      hash: sha256:73f9e8d3a6351fd9c5ccd1fe561484a71b15313e6971a61ae86bd05268584bd0
+      checkedAt: 2026-09-13
+  - name: name
+    kind: string
+    values: []
+    required: true
+    constraints:
+      minLength: 1
+      maxLength: 64
+      pattern: ^[a-z0-9]+(-[a-z0-9]+)*$
+      matchesDirectoryName: true
+    stability: stable
+    effect: Identifies the skill; loaded into the catalog at session start.
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#name-field'
+      hash: sha256:352107583798db503b77e3bf11f03dc41b959de42fc0f617c2fbd3f58701fc0b
+      checkedAt: 2026-09-13
+  agentFields: []
+  hooks: []
+  tools: []
+  limits:
+  - name: catalog_entry_tokens
+    value: 100
+    unit: tokens
+    enforcement: recommended
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#progressive-disclosure'
+      hash: sha256:64edd638d2f436c1b957503950631a0a57164d872df8c15f7b200fb8b9fe2a59
+      checkedAt: 2026-09-13
+  - name: skill_body_tokens
+    value: 5000
+    unit: tokens
+    enforcement: recommended
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#progressive-disclosure'
+      hash: sha256:64edd638d2f436c1b957503950631a0a57164d872df8c15f7b200fb8b9fe2a59
+      checkedAt: 2026-09-13
+  - name: skill_file_lines
+    value: 500
+    unit: lines
+    enforcement: recommended
+    provenance:
+      url: https://agentskills.io/specification
+      anchor: '#progressive-disclosure'
+      hash: sha256:64edd638d2f436c1b957503950631a0a57164d872df8c15f7b200fb8b9fe2a59
+      checkedAt: 2026-09-13
+  invisibleSources: []
+status:
+  stale: false
+  drift: []

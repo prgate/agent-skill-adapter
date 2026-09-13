@@ -288,3 +288,47 @@ def test_committed_schema_matches_models() -> None:
     assert committed.read_text(encoding="utf-8") == json_schema_text(), (
         "schema is out of date; run `make spec-schema`"
     )
+
+
+SPECS = REPO_ROOT / "specs"
+AGENTSKILLS_1_0_0 = SPECS / "agentskills" / "1.0.0" / "spec.yaml"
+
+
+def test_published_baseline_loads() -> None:
+    manifest = load_manifest(AGENTSKILLS_1_0_0)
+    assert manifest.metadata.labels["role"] == "baseline"
+    assert manifest.spec.extends is None
+    assert manifest.spec.frontmatter is not None
+    assert manifest.spec.layout is not None
+    assert {r.name for r in manifest.spec.skill_fields} >= {
+        "name",
+        "description",
+        "license",
+        "compatibility",
+        "metadata",
+        "allowed-tools",
+    }
+
+
+@pytest.mark.parametrize("spec_path", sorted(SPECS.glob("*/*/spec.yaml")))
+def test_published_spec_is_canonically_serialized(spec_path: Path) -> None:
+    """A hand edit that breaks canonical form fails here, not in a later diff."""
+    assert dump_manifest(load_manifest(spec_path)) == spec_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("spec_path", sorted(SPECS.glob("*/*/spec.yaml")))
+def test_published_records_carry_provenance_hashes(spec_path: Path) -> None:
+    """An unverified record is not shippable (FR-2)."""
+    spec = load_manifest(spec_path).spec
+    provenances = (
+        [(f.name, f.provenance) for f in spec.skill_fields]
+        + [(t.name, t.provenance) for t in spec.tools]
+        + [(limit.name, limit.provenance) for limit in spec.limits]
+        + [(s.path, s.provenance) for s in spec.invisible_sources]
+    )
+    if spec.frontmatter is not None:
+        provenances.append(("frontmatter", spec.frontmatter.provenance))
+    if spec.layout is not None:
+        provenances.append(("layout", spec.layout.provenance))
+    missing = [name for name, provenance in provenances if provenance.hash is None]
+    assert not missing, f"{spec_path}: records without a provenance hash: {missing}"
