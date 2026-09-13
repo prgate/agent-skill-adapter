@@ -43,3 +43,6 @@ htmlcov/
 .claude
 .hermes
 .zcode
+
+# Local snapshot of upstream specification sources (raw material for specs/)
+.cache/
