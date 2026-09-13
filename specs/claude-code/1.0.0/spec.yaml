@@ -281,272 +281,272 @@ spec:
   - name: Agent
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Agent
+      hash: sha256:b4d3a48f0961c3fa55ed567197f3ba8080be35af4034456075eaaf4d3b5e0acc
       checkedAt: 2026-09-13
   - name: Artifact
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Artifact
+      hash: sha256:c1aed01c1fe15596ad08ea663857aa1552402760cdb57d613498a249344bebbc
       checkedAt: 2026-09-13
   - name: AskUserQuestion
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: AskUserQuestion
+      hash: sha256:cb0656053a85f220e878ade82e2761525f367f37fe6cf3c40662c6adca6b1e2c
       checkedAt: 2026-09-13
   - name: Bash
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Bash
+      hash: sha256:fd51c7432487b6af212ef1bff421332aea4584d7ef395d76172434302fc03b3b
       checkedAt: 2026-09-13
   - name: CronCreate
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: CronCreate
+      hash: sha256:771ca99fe0230c7d6b9adb5af288b4f5e63aca4a96e0d1e90b2028264c0393d2
       checkedAt: 2026-09-13
   - name: CronDelete
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: CronDelete
+      hash: sha256:99dd7e5b999b0dc95d9d38b11dc6d7a82ae7b466d69257335d7c5c1ae9aa4a0b
       checkedAt: 2026-09-13
   - name: CronList
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: CronList
+      hash: sha256:e84be2637aedaa6486201dd4747a157ed62d2c0aa6ace0bbaf31b2cface8eb4f
       checkedAt: 2026-09-13
   - name: Edit
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Edit
+      hash: sha256:dbea0af589238435fc11edadea6c712d6879b51c5f67b9e7dc99a224bfd0baff
       checkedAt: 2026-09-13
   - name: EndConversation
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: EndConversation
+      hash: sha256:ae325337467b32d4cd6ef17877832658e7c25dfadadee73d8c03aae4e364be34
       checkedAt: 2026-09-13
   - name: EnterPlanMode
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: EnterPlanMode
+      hash: sha256:2b6f52d26537241046bd31fe97be172f6ad1946d14e7195820e0e9d171df86f7
       checkedAt: 2026-09-13
   - name: EnterWorktree
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: EnterWorktree
+      hash: sha256:0725b57c1f18f61337958426a860dcd936fcb78c384615905fd5fa61eecd4155
       checkedAt: 2026-09-13
   - name: ExitPlanMode
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: ExitPlanMode
+      hash: sha256:546eb1a2df19e68353550dc9e9af9e5bdfc823e0a9288e17bf528a7f470c6f34
       checkedAt: 2026-09-13
   - name: ExitWorktree
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: ExitWorktree
+      hash: sha256:1fb6f0a4eb5436f3a1d813695277395e90f1cd1b758bbfa5411d67e7ddc0319a
       checkedAt: 2026-09-13
   - name: Glob
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Glob
+      hash: sha256:dd8c7a047464e603c5cc494c68b310381d8c6d1e6d586752fa07de573cda87ef
       checkedAt: 2026-09-13
   - name: Grep
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Grep
+      hash: sha256:55f2b692139148cf9fcad7fcc446bd95c052f438c6794bbf9b0b7cfe1b611d79
       checkedAt: 2026-09-13
   - name: LSP
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: LSP
+      hash: sha256:b5ac154e17958ef7572e72db4e262e30922203b336e631392897b20e1cb744ae
       checkedAt: 2026-09-13
   - name: ListAgents
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: ListAgents
+      hash: sha256:743f0a748dc125c077c619ea78cf6e507a17b86d52639adb782c68a647de61e3
       checkedAt: 2026-09-13
   - name: ListMcpResourcesTool
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: ListMcpResourcesTool
+      hash: sha256:c68f46cabec21539a3a6a25414ac9f50b654d9cb84f131884c8bc433453d3082
       checkedAt: 2026-09-13
   - name: Monitor
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Monitor
+      hash: sha256:610a546ab300dba815eb5ed8c6fe8a5207f85f14259f411f7d3d3c37395a7192
       checkedAt: 2026-09-13
   - name: NotebookEdit
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: NotebookEdit
+      hash: sha256:c927e9d84dce8f5aebb8c18f94b295fe61ffe377a5658234e9e38827f015380c
       checkedAt: 2026-09-13
   - name: PowerShell
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: PowerShell
+      hash: sha256:8bbd6c6b129e3d1472789e642a442df27049ef11010a3dd7ee1f0679fb870c98
       checkedAt: 2026-09-13
   - name: PushNotification
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: PushNotification
+      hash: sha256:ed309b0ef29bcf50da4564305fec958bec326ccdcd8c32e4bfb19c94db8dfceb
       checkedAt: 2026-09-13
   - name: Read
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Read
+      hash: sha256:33482b16d5e9331bea4ca8dc6c728a011f8def68cea55a5f551dd9aa8dd37027
       checkedAt: 2026-09-13
   - name: ReadMcpResourceTool
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: ReadMcpResourceTool
+      hash: sha256:9359de030757e8ac731d9972d071ad42557590088abf080e968ff4f149f49349
       checkedAt: 2026-09-13
   - name: RemoteTrigger
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: RemoteTrigger
+      hash: sha256:37e9fb01e3a6efe5389d8623a205ab85dd1d25b58d7ef1a2ae3688b39b094c34
       checkedAt: 2026-09-13
   - name: ReportFindings
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: ReportFindings
+      hash: sha256:579130f5b4a77ce06f40fcfb64ca93a9876252d3dea8352df23a6ecd86d3549b
       checkedAt: 2026-09-13
   - name: ScheduleWakeup
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: ScheduleWakeup
+      hash: sha256:9b1eb29ed9a95a93b2b87fb0270aecd87b1a6e34b36e02cc47b2ae4a89ec574d
       checkedAt: 2026-09-13
   - name: SendFeedback
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: SendFeedback
+      hash: sha256:ef7cff5ccda205069f842d5e8d72a3c0da24e73ef33b06da34a46a0ce94927d9
       checkedAt: 2026-09-13
   - name: SendMessage
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: SendMessage
+      hash: sha256:13b28a7b918bb16eeb22e9a088b7199670db67b264dc07189ccc502c925e76c8
       checkedAt: 2026-09-13
   - name: SendUserFile
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: SendUserFile
+      hash: sha256:814c7adbed840d1362d52ad81f6d6d687d3aa49222eb55368973b2b1a9c52102
       checkedAt: 2026-09-13
   - name: ShareOnboardingGuide
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: ShareOnboardingGuide
+      hash: sha256:930682778121792bf578f3539462ebbcc792438d47323d11acce6c1c564f33ef
       checkedAt: 2026-09-13
   - name: Skill
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Skill
+      hash: sha256:ce0803d0acfb66ab8d9d9f743e84646d2ed752abd318e0ed3c8ff5b046c122e8
       checkedAt: 2026-09-13
   - name: TaskCreate
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: TaskCreate
+      hash: sha256:229cbbad9d6d2b8fbfc92e9451813f92001cdbbe871d42d9dcc423a7479a6891
       checkedAt: 2026-09-13
   - name: TaskGet
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: TaskGet
+      hash: sha256:2cf0915c5db42b2029b2f0d5fcb167151cb66cbb25678bfb288a049ade11541c
       checkedAt: 2026-09-13
   - name: TaskList
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: TaskList
+      hash: sha256:96985134a3f4240f5bd423f298803cc079aead9f8349d2ba094804584c963cab
       checkedAt: 2026-09-13
   - name: TaskOutput
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: TaskOutput
+      hash: sha256:7a9abec66f3395b08f9d80ab357a9b50fbdb2fda9f6c16cfc73dcd230492a262
       checkedAt: 2026-09-13
   - name: TaskStop
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: TaskStop
+      hash: sha256:8118010110562780bc54be17d0693356b9b3e3fd63117b3367b8d4087b2d6e9f
       checkedAt: 2026-09-13
   - name: TaskUpdate
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: TaskUpdate
+      hash: sha256:3c9c56ac9f68baf3faf471f2eb029fadeeba0b9b77ab73a478093255e301b814
       checkedAt: 2026-09-13
   - name: TodoWrite
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: TodoWrite
+      hash: sha256:361898f496023760fc4abdf70e06a070cf1de473bfe34f5fe4fdd61b7595cda4
       checkedAt: 2026-09-13
   - name: ToolSearch
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: ToolSearch
+      hash: sha256:c88dfe80d63d348a826826d464e22f6b87bff0f7a3aa282be265a48dafbad00a
       checkedAt: 2026-09-13
   - name: WaitForMcpServers
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: WaitForMcpServers
+      hash: sha256:8b861ef7883cfbd98cfdef46a190a60d1e5e6023ec4090cec6cc47b7ae0b2013
       checkedAt: 2026-09-13
   - name: WebFetch
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: WebFetch
+      hash: sha256:70cd106aef8d9f8349bb428db4ad73e30fe88c50ec108ba286926293cfbf7bb7
       checkedAt: 2026-09-13
   - name: WebSearch
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: WebSearch
+      hash: sha256:8049598bd28e09074aca69132ab91940e8d4745635a3a60ed657ad8d9318c117
       checkedAt: 2026-09-13
   - name: Workflow
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Workflow
+      hash: sha256:7635a579b0251268fe610038a265e8f2d416981794b6eea3f2578905d0c205a5
       checkedAt: 2026-09-13
   - name: Write
     provenance:
       url: https://code.claude.com/docs/en/tools-reference
-      anchor: '#page-title'
-      hash: sha256:2ac8326faddaa25af205a4fa5bc0691f6a1c0f978364a38d5a63d5ca837c3022
+      selector: Write
+      hash: sha256:dddd2b07819132238c45d594f8f469756b53eeafe9ffebc06c5e46003603a827
       checkedAt: 2026-09-13
   limits:
   - name: catalog_entry_chars
@@ -568,6 +568,15 @@ spec:
       hash: sha256:8a79f6a2c06b2a3c018a1ff76a22b2622f6b51d8072aa67c9b9afbb2f3cd1f2c
       checkedAt: 2026-09-13
   invisibleSources:
+  - path: CLAUDE.md
+    reason: Enterprise managed-policy memory instructions delivered to a fixed system directory per platform
+      (macOS, Linux/WSL, Windows); broadest scope of any CLAUDE.md and loaded before every other one;
+      outside any project's repository or the user's home directory.
+    provenance:
+      url: https://code.claude.com/docs/en/memory
+      anchor: '#choose-where-to-put-claude-md-files'
+      hash: sha256:38c07f3ea164838135cf6d3224a1cabc0ee2efc474d6227538d0d772ae5d30e7
+      checkedAt: 2026-09-13
   - path: managed-settings.json
     reason: Enterprise policy delivered via the file-based mechanism (a system directory per platform),
       an MDM profile, or server-managed settings; outside any project's repository or the user's home

@@ -387,3 +387,67 @@ def test_published_versions_are_immutable(lock_path: Path) -> None:
         assert directory_hash(directory) == digest, (
             f"{directory} changed after publication; publish a new version directory instead"
         )
+
+
+def test_directory_hash_ignores_status_but_not_spec(tmp_path: Path) -> None:
+    """FR-5 pins authored content; `status` is machine-written and must not move the pin.
+
+    A `verify` run that finds no drift still rewrites `status.verifiedAt`
+    (design section 4). If that rewrite moved the pin, FR-5 immutability and
+    FR-7/FR-8 verification could never both hold.
+    """
+    directory = tmp_path / "1.0.0"
+    directory.mkdir()
+    manifest_path = directory / "spec.yaml"
+    manifest_path.write_text(BASELINE, encoding="utf-8")
+    before = directory_hash(directory)
+
+    reverified = BASELINE.replace("verifiedAt: 2026-09-01", "verifiedAt: 2026-09-10")
+    manifest_path.write_text(reverified, encoding="utf-8")
+    assert directory_hash(directory) == before, "a status-only rewrite must not move the pin"
+
+    edited = BASELINE.replace("Identifies the skill.", "Something else.")
+    manifest_path.write_text(edited, encoding="utf-8")
+    assert directory_hash(directory) != before, "an authored-content edit must still be caught"
+
+
+def test_directory_hash_does_not_follow_symlinks(tmp_path: Path) -> None:
+    """FR-14: outward links are not dereferenced into the pinned hash."""
+    directory = tmp_path / "1.0.0"
+    directory.mkdir()
+    (directory / "spec.yaml").write_text(BASELINE, encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret-a", encoding="utf-8")
+    (directory / "linked.txt").symlink_to(outside)
+    before = directory_hash(directory)
+
+    outside.write_text("secret-b", encoding="utf-8")
+    assert directory_hash(directory) == before, "a symlinked file must not enter the pinned hash"
+
+
+EVIL_BASELINE = """\
+apiVersion: adapter.prgate.io/v1alpha1
+kind: EnvironmentSpec
+metadata:
+  name: evil
+  version: 9.9.9
+  labels:
+    role: baseline
+spec:
+  environment:
+    versions: "*"
+  validForDays: 3650
+"""
+
+
+def test_extends_rejects_path_traversal(tmp_path: Path) -> None:
+    """FR-14: a `..` segment in `extends` must not resolve outside `specs/`."""
+    specs_dir = tmp_path / "specs"
+    outside = tmp_path / "outside" / "evil" / "9.9.9"
+    outside.mkdir(parents=True)
+    (outside / "spec.yaml").write_text(EVIL_BASELINE, encoding="utf-8")
+    write_baseline(specs_dir)
+    path = write_spec(specs_dir, extends="../outside/evil@9.9.9")
+    with pytest.raises(SpecLoadError) as excinfo:
+        load_manifest(path)
+    assert "spec.extends" in str(excinfo.value)

@@ -10,6 +10,14 @@ Hash contract (fixed):
 2. Unicode NFC; `\\r\\n` to `\\n`.
 3. Runs of whitespace to one space; trim.
 4. UTF-8 bytes to sha256, written with the `sha256:` prefix.
+
+A record addresses its source text with exactly one of two selectors:
+`anchor` cuts the section from the heading it names up to the next heading of
+the same or higher level. `selector` addresses one table row instead: the row
+whose first cell is `<code>{selector}</code>`, verbatim. Use `selector` when a
+record's evidence is one row of a page-wide table (e.g. a tool name) rather
+than a heading section — an `anchor` there would span the whole page and
+every record sharing it would drift together on any unrelated edit.
 """
 
 from __future__ import annotations
@@ -19,6 +27,7 @@ import hashlib
 import sys
 import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import date
 from html.parser import HTMLParser
@@ -32,6 +41,12 @@ from agent_skill_adapter.specs.models import Manifest, Provenance  # noqa: E402
 
 _USER_AGENT = "agent-skill-adapter-spec-provenance/1.0"
 _SKIPPED_TAGS = {"script", "style"}
+_ALLOWED_SCHEMES = {"https"}
+_ALLOWED_HOSTS = {"agentskills.io", "code.claude.com"}
+
+
+class UnsafeURLError(ValueError):
+    """A provenance URL, or the URL a redirect ends on, is outside the fetch allowlist."""
 
 
 def _heading_level(tag: str) -> int | None:
@@ -74,6 +89,63 @@ class _SectionExtractor(HTMLParser):
             self.chunks.append(data)
 
 
+class _RowExtractor(HTMLParser):
+    """Collects the text of the `<tr>` whose first cell is `<code>{target}</code>`."""
+
+    def __init__(self, target: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self._target = target
+        self._in_row = False
+        self._in_first_cell = False
+        self._first_cell_seen = False
+        self._first_cell_text = ""
+        self._row_chunks: list[str] = []
+        self._skip_depth = 0
+        self.found = False
+        self.chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "tr":
+            self._in_row = True
+            self._first_cell_seen = False
+            self._first_cell_text = ""
+            self._row_chunks = []
+        elif tag in ("td", "th") and self._in_row and not self._first_cell_seen:
+            self._in_first_cell = True
+        if tag in _SKIPPED_TAGS:
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("td", "th") and self._in_first_cell:
+            self._in_first_cell = False
+            self._first_cell_seen = True
+        elif tag == "tr":
+            if self._in_row and not self.found and self._first_cell_text.strip() == self._target:
+                self.found = True
+                self.chunks = self._row_chunks
+            self._in_row = False
+        if tag in _SKIPPED_TAGS and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        if self._in_row:
+            self._row_chunks.append(data)
+        if self._in_first_cell:
+            self._first_cell_text += data
+
+
+def extract_row(html: str, target: str) -> str | None:
+    """A `selector` cut: the text of the table row whose first cell is `target`."""
+    parser = _RowExtractor(target)
+    parser.feed(html)
+    parser.close()
+    if not parser.found:
+        return None
+    return "".join(parser.chunks)
+
+
 def normalize(text: str) -> str:
     """Steps 2-3 of the hash contract."""
     text = unicodedata.normalize("NFC", text).replace("\r\n", "\n")
@@ -96,9 +168,18 @@ def section_hash(text: str) -> str:
     return f"sha256:{digest}"
 
 
+def _check_url(url: str) -> None:
+    """Reject anything but https to an allowlisted docs host (closes file:// and metadata SSRF)."""
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme not in _ALLOWED_SCHEMES or parsed.hostname not in _ALLOWED_HOSTS:
+        raise UnsafeURLError(f"refusing to fetch {url!r}: scheme/host is not allowlisted")
+
+
 def fetch(url: str) -> str:
+    _check_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+    with urllib.request.urlopen(request, timeout=30) as response:
+        _check_url(response.geturl())  # urlopen follows redirects; re-check where it landed
         body: bytes = response.read()
     return body.decode("utf-8", errors="replace")
 
@@ -127,12 +208,15 @@ def iter_records(manifest: Manifest) -> list[tuple[str, Provenance]]:
 
 def _section_text(provenance: Provenance) -> tuple[str | None, str | None]:
     """Return `(text, reason)`: text is None exactly when reason explains why."""
-    if provenance.selector is not None:
-        return None, "selector-not-supported"
     try:
         html = fetch(provenance.url)
     except (urllib.error.URLError, OSError) as error:
         return None, f"fetch-failed: {error}"
+    if provenance.selector is not None:
+        row = extract_row(html, provenance.selector)
+        if row is None:
+            return None, "selector-not-found"
+        return row, None
     assert provenance.anchor is not None
     section = extract_section(html, provenance.anchor)
     if section is None:

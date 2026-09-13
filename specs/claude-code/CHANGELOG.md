@@ -37,15 +37,25 @@ D8).
   way the baseline specification does — `scripts/` appears only in one
   illustrative example, not as a stated convention.
 - `tools`: 45 names from the table under `tools-reference`'s single page
-  heading (no closer heading exists above the table in the rendered page).
+  heading. The page has no heading above the table narrower than that one, so
+  each record's `provenance` addresses its own table row with `selector`
+  (the row whose first cell is the tool name) instead of `anchor`: an
+  `anchor: '#page-title'` section runs to the next `h1` and there is only one
+  on the page, so it would have covered the whole page — every one of the
+  ~20 unrelated `## <Tool> tool behavior` subsections included — and any edit
+  anywhere on the page would have drifted all 45 records at once.
 - `limits`: `skill_file_lines` (500, recommended) and `catalog_entry_chars`
   (1536, hard — the truncation is automatic, though the cap is configurable).
   Other numeric mentions on the page (compaction token budgets, listing
   character budget as a percentage) either use a unit outside
   `bytes|chars|tokens|lines` or are not stated as a limit on authored
   content, and are not recorded (design's Open point #2).
-- `invisibleSources`: `~/.claude/settings.json`, `~/.claude/CLAUDE.md`, and
-  `managed-settings.json` — each lives outside any project's repository.
+- `invisibleSources`: `~/.claude/settings.json`, `~/.claude/CLAUDE.md`,
+  `managed-settings.json`, and the enterprise managed-policy `CLAUDE.md`
+  (macOS/Linux-WSL/Windows system directories) — each lives outside any
+  project's repository. The managed-policy `CLAUDE.md` is the first entry of
+  the "Choose where to put CLAUDE.md files" table already hashed for the
+  `~/.claude/CLAUDE.md` record; both records cite that same section.
   Project-scoped files (`.claude/settings.json`, `.claude/settings.local.json`,
   project `CLAUDE.md`) are inside the repository tree and are not recorded
   here.

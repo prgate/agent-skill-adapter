@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,9 @@ def _parse_extends(value: str) -> tuple[str, str]:
     name, separator, version = value.partition("@")
     if not separator or not name or not version:
         raise ValueError("extends must be '<name>@<version>'")
+    for part in (name, version):
+        if Path(part).is_absolute() or part in {".", ".."} or "/" in part or "\\" in part:
+            raise ValueError(f"extends name/version must not be a path: {value!r}")
     return name, version
 
 
@@ -278,12 +282,34 @@ def dump_manifest(manifest: Manifest) -> str:
     return text
 
 
+def _pinned_content(file_path: Path) -> bytes:
+    """The bytes a published directory pins for one file.
+
+    `spec.yaml` mixes human-authored content with `status`, which the
+    provenance script rewrites on every `verify` run (design section 4: `spec`
+    is desired state, `status` is observed state). Pinning `status` would make
+    FR-5 immutability and FR-7/FR-8 verification mutually exclusive, so only
+    `apiVersion`/`kind`/`metadata`/`spec` are pinned; the file bytes stand in
+    for every other file, which the format does not give a machine-written part.
+    """
+    if file_path.name != "spec.yaml":
+        return file_path.read_bytes()
+    raw = _read(file_path)
+    pinned = {key: raw[key] for key in ("apiVersion", "kind", "metadata", "spec") if key in raw}
+    return json.dumps(pinned, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+
+
 def directory_hash(path: Path) -> str:
-    """Hash a published version directory: sorted relative paths and file contents."""
+    """Hash a published version directory: sorted relative paths and pinned content.
+
+    Symlinks are never dereferenced (FR-14): `p.is_file()` alone follows them,
+    so a committed symlink could pull bytes from outside the directory the
+    hash claims to pin.
+    """
     digest = hashlib.sha256()
-    for file_path in sorted(p for p in path.rglob("*") if p.is_file()):
+    for file_path in sorted(p for p in path.rglob("*") if p.is_file() and not p.is_symlink()):
         relative = file_path.relative_to(path).as_posix().encode("utf-8")
-        content = file_path.read_bytes()
+        content = _pinned_content(file_path)
         digest.update(len(relative).to_bytes(4, "big"))
         digest.update(relative)
         digest.update(len(content).to_bytes(8, "big"))

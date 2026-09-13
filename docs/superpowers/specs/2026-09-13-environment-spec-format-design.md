@@ -320,9 +320,14 @@ SHA.
   patterns).
 - **frontmatter.unknownFields** — `reject` (reference validator
   `ALLOWED_FIELDS`).
-- **layout** — `skillFile: [SKILL.md, skill.md]`; `skillsDirs`:
-  `.agents/skills` (project), `~/.agents/skills` (user);
-  `conventionalDirs: [scripts, references, assets]`.
+- **layout** — `skillFile: [SKILL.md]`; `skillsDirs: []`;
+  `conventionalDirs: [scripts, references, assets]`. The values below were
+  removed after implementation: the "Directory structure" section of the open
+  Agent Skills specification documents only the contents of one skill
+  directory, not a lowercase `skill.md` alternative or where skill directories
+  are discovered on disk (recorded in `specs/agentskills/CHANGELOG.md`) —
+  ~~`skillFile: [SKILL.md, skill.md]`; `skillsDirs`: `.agents/skills`
+  (project), `~/.agents/skills` (user)~~.
 - **limits** — `skill_file_lines` 500 (recommended), `skill_body_tokens` 5000
   (recommended), `catalog_entry_tokens` 100 (recommended).
 - **tools**, **invisibleSources** — empty: the open spec names no tools and no

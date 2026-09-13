@@ -5,6 +5,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 import spec_provenance  # type: ignore[import-not-found]  # noqa: E402
@@ -57,3 +59,38 @@ def test_missing_anchor_returns_none() -> None:
 
 def test_hash_carries_prefix() -> None:
     assert spec_provenance.section_hash("text").startswith("sha256:")
+
+
+ROW_TABLE_HTML = """
+<html><body>
+<table><tbody>
+<tr><td><code>Bash</code></td><td>Executes shell commands.</td></tr>
+<tr><td><code>Read</code></td><td>Reads a file.</td></tr>
+</tbody></table>
+</body></html>
+"""
+
+
+def test_extract_row_returns_only_the_matching_row() -> None:
+    row = spec_provenance.extract_row(ROW_TABLE_HTML, "Bash")
+    assert row is not None
+    assert "shell commands" in row
+    assert "Reads a file" not in row
+
+
+def test_extract_row_missing_target_returns_none() -> None:
+    assert spec_provenance.extract_row(ROW_TABLE_HTML, "Nope") is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "file:///etc/hosts",
+        "http://169.254.169.254/latest/meta-data/",
+        "https://evil.example.com/",
+    ],
+)
+def test_fetch_rejects_urls_outside_the_allowlist(url: str) -> None:
+    """s1: no scheme/host outside https + the two documented docs hosts, ever."""
+    with pytest.raises(spec_provenance.UnsafeURLError):
+        spec_provenance.fetch(url)

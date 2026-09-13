@@ -2,4 +2,4 @@
 # immutable: to correct a record, publish a new version next to it.
 # Regenerate after publishing a new version with:
 #   uv run python -c "from pathlib import Path; from agent_skill_adapter.specs.loader import directory_hash; print(directory_hash(Path('specs/<env>/<version>')))"
-1.0.0 sha256:b4b5309f68b95bb40569407e8bb4cd7a3d63d63ae6c7729f7ba5370a3cea6d05
+1.0.0 sha256:a7ab452f039594e03cc525c27a6d509cd60ffa1719f71472e44caeb080e578d9
