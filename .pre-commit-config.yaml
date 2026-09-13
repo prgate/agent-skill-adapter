@@ -23,6 +23,9 @@ repos:
     hooks:
       - id: typos
         args: [--force-exclude]
+        # `.autopilot/` is the run record: it quotes user text and defect
+        # reports verbatim, misspellings included.
+        exclude: ^\.autopilot/
 
   # Local hooks: reuse the project's uv-managed environment and lockfile
   # ensuring zero version drift and consistent lint/typecheck runs.

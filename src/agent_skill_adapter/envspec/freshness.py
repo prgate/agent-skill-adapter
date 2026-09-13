@@ -7,7 +7,9 @@ below this module — and no test — needs a network at all.
 
 from __future__ import annotations
 
+import gzip
 import re
+import zlib
 from argparse import ArgumentParser
 from collections.abc import Callable, Sequence
 from datetime import date
@@ -33,10 +35,12 @@ as unreachable: anything else coming out of a ``fetch`` is a defect and must sur
 
 # What reading a source can legitimately fail with: the server or the connection
 # (OSError, which covers every urllib error), an answer that breaks off mid-body
-# (HTTPException, which is not an OSError), a page that is not UTF-8, a section that
-# is no longer there. A failure outside this set is a defect of ours and must not be
-# filed as a discrepancy against the vendor.
-_UNREACHABLE = (OSError, HTTPException, UnicodeDecodeError, AnchorError)
+# (HTTPException, which is not an OSError), a section that is no longer there.
+# A failure outside this set is a defect of ours and must not be filed as a
+# discrepancy against the vendor. A body we cannot decode is one of those: it says
+# we read the answer wrong, not that the vendor's page changed, and filing it would
+# quietly make the description stale over a fault of our own.
+_UNREACHABLE = (OSError, HTTPException, AnchorError)
 
 
 def markdown_url(source: Source) -> str:
@@ -47,15 +51,34 @@ def markdown_url(source: Source) -> str:
     return source.markdown_url or f"{source.url}.md"
 
 
+class CheckFailed(RuntimeError):
+    """A source failed in a way that is a defect of ours, not a statement about the vendor.
+
+    It carries what the run did establish, so a failure on one source neither hides the
+    defect nor throws away the discrepancies the other sources already showed.
+    """
+
+    def __init__(self, found: list[Discrepancy], failures: list[BaseException]) -> None:
+        listed = "; ".join(f"{type(error).__name__}: {error}" for error in failures)
+        super().__init__(f"{len(failures)} source(s) failed unexpectedly: {listed}")
+        self.found = found
+        self.failures = failures
+
+
 def check(spec: EnvSpec, *, fetch: Fetch, today: date | None = None) -> list[Discrepancy]:
     """Re-read every source of ``spec`` and report the ones that no longer confirm it.
 
     A section whose hash moved is ``changed`` and carries both hashes. A page that could
     not be read, or that no longer has the anchored section, is ``unreachable`` — an
     unreadable source is a discrepancy, never a confirmation that the entry still holds.
+
+    Any other failure is a defect of ours: the remaining sources are still checked, and
+    :class:`CheckFailed` is raised at the end carrying both the defects and the
+    discrepancies found, so neither is lost.
     """
     when = today or date.today()
     found: list[Discrepancy] = []
+    failures: list[BaseException] = []
     for source in spec.sources:
         url = markdown_url(source)
         try:
@@ -69,6 +92,10 @@ def check(spec: EnvSpec, *, fetch: Fetch, today: date | None = None) -> list[Dis
                 )
             )
             continue
+        # Everything else is a defect of ours; it is re-raised below, never swallowed.
+        except Exception as error:
+            failures.append(error)
+            continue
         if fresh != source.sha256:
             found.append(
                 Discrepancy(
@@ -77,6 +104,8 @@ def check(spec: EnvSpec, *, fetch: Fetch, today: date | None = None) -> list[Dis
                     detail=f"{when}: {url}: recorded {source.sha256}, now {fresh}",
                 )
             )
+    if failures:
+        raise CheckFailed(found, failures)
     return found
 
 
@@ -140,14 +169,48 @@ def record(path: str | Path, discrepancies: Sequence[Discrepancy]) -> None:
     file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def decode_body(body: bytes, content_encoding: str | None) -> str:
+    """Turn a response body into text, honouring the encoding the server declared.
+
+    A server may compress an answer we did not ask to have compressed, and the same URL
+    may come back compressed on one request and plain on the next. Decoding the bytes
+    without reading ``Content-Encoding`` turns that into a decode failure, and a decode
+    failure used to be filed as a discrepancy against the vendor — a freshness run then
+    made the description stale over nothing. The header decides, never the bytes.
+    """
+    declared = (content_encoding or "identity").strip().lower()
+    if declared in ("gzip", "x-gzip"):
+        try:
+            body = gzip.decompress(body)
+        # A body that stops mid-stream is the same event as a response that stops
+        # mid-answer, and must be classed with it rather than end the run.
+        except (EOFError, zlib.error) as error:
+            raise OSError(f"broken gzip body: {type(error).__name__}: {error}") from error
+    elif declared not in ("identity", ""):
+        raise OSError(f"unsupported Content-Encoding {declared!r}")
+    return body.decode("utf-8")
+
+
 def _fetch(url: str) -> str:
     """Read ``url`` over HTTP. Anything but a 200 is a failure, never an empty page."""
-    request = Request(url, headers={"User-Agent": USER_AGENT})
+    request = Request(
+        url,
+        headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, identity"},
+    )
     with urlopen(request, timeout=30) as response:
         if response.status != 200:
             raise OSError(f"HTTP {response.status}")
         body: bytes = response.read()
-    return body.decode("utf-8")
+        declared: str | None = response.headers.get("Content-Encoding")
+    return decode_body(body, declared)
+
+
+def _report(file: Path, found: Sequence[Discrepancy], *, write: bool) -> None:
+    """Print every discrepancy of one description, and record it when asked to."""
+    for entry in found:
+        print(f"{file}: {entry.source_id}: {entry.kind.value}: {entry.detail}")
+    if write:
+        record(file, found)
 
 
 def main(argv: Sequence[str] | None = None, *, fetch: Fetch = _fetch) -> int:
@@ -173,11 +236,13 @@ def main(argv: Sequence[str] | None = None, *, fetch: Fetch = _fetch) -> int:
 
     found_any = False
     for file in files:
-        found = check(load(file), fetch=fetch)
-        for entry in found:
-            print(f"{file}: {entry.source_id}: {entry.kind.value}: {entry.detail}")
-        if args.write:
-            record(file, found)
+        try:
+            found = check(load(file), fetch=fetch)
+        except CheckFailed as failure:
+            # Report and record what this file did show, then let the defect out.
+            _report(file, failure.found, write=args.write)
+            raise
+        _report(file, found, write=args.write)
         found_any = found_any or bool(found)
     if not found_any:
         print("every source still confirms its entries")

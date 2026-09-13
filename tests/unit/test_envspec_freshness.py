@@ -5,15 +5,25 @@
 
 from __future__ import annotations
 
+import gzip
 from datetime import date
 from email.message import Message
 from http.client import IncompleteRead
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.request import Request
 
 import pytest
 
-from agent_skill_adapter.envspec.freshness import check, main, record
+from agent_skill_adapter.envspec import freshness
+from agent_skill_adapter.envspec.freshness import (
+    CheckFailed,
+    _fetch,
+    check,
+    decode_body,
+    main,
+    record,
+)
 from agent_skill_adapter.envspec.loader import is_stale, load
 from agent_skill_adapter.envspec.model import DiscrepancyKind
 from agent_skill_adapter.envspec.normalize import digest, section_text
@@ -34,17 +44,25 @@ Not part of the section.
 """
 
 
-def write_spec(root: Path, sha256: str, *, markdown_url: str | None = None) -> Path:
-    """Write a description whose single source records ``sha256`` for the page section."""
-    source = [
-        "  - id: skills-frontmatter",
-        "    url: https://example.invalid/docs/skills",
-        *([f"    markdown_url: {markdown_url}"] if markdown_url else []),
-        f'    anchor: "{ANCHOR}"',
-        f'    sha256: "{sha256}"',
-        f"    checked_at: {TODAY}",
-        '    environment_version: "2.1.270"',
-    ]
+SECOND_URL = "https://example.invalid/docs/hooks"
+
+
+def write_spec(root: Path, sha256: str, *, second_source: bool = False) -> Path:
+    """Write a description whose sources record ``sha256`` for the page section."""
+
+    def source(source_id: str, url: str) -> list[str]:
+        return [
+            f"  - id: {source_id}",
+            f"    url: {url}",
+            f'    anchor: "{ANCHOR}"',
+            f'    sha256: "{sha256}"',
+            f"    checked_at: {TODAY}",
+            '    environment_version: "2.1.270"',
+        ]
+
+    sources = source("skills-frontmatter", "https://example.invalid/docs/skills")
+    if second_source:
+        sources += source("hooks-config", SECOND_URL)
     text = "\n".join(
         [
             "schema_version: 1",
@@ -54,7 +72,7 @@ def write_spec(root: Path, sha256: str, *, markdown_url: str | None = None) -> P
             f"checked_at: {TODAY}",
             "normalization: v1",
             "sources:",
-            *source,
+            *sources,
             "capabilities:",
             "  - id: skill.frontmatter.name",
             "    kind: skill-field",
@@ -171,8 +189,17 @@ def test_a_defect_of_ours_is_not_filed_as_a_vendor_discrepancy(tmp_path: Path) -
     def broken(_url: str) -> str:
         raise TypeError("a defect in our own code, not the vendor's server")
 
-    with pytest.raises(TypeError):
+    with pytest.raises(CheckFailed) as failed:
         check(spec, fetch=broken, today=TODAY)
+    assert [type(error) for error in failed.value.failures] == [TypeError]
+    assert failed.value.found == [], "a defect of ours is never filed against the vendor"
+
+    def undecodable(_url: str) -> str:
+        raise UnicodeDecodeError("utf-8", b"\x1f\x8b", 1, 2, "invalid start byte")
+
+    with pytest.raises(CheckFailed) as failed:
+        check(spec, fetch=undecodable, today=TODAY)
+    assert [type(error) for error in failed.value.failures] == [UnicodeDecodeError]
 
 
 def test_appended_entries_take_the_indent_of_the_existing_block(tmp_path: Path) -> None:
@@ -212,3 +239,91 @@ def test_main_refuses_a_root_with_nothing_to_check(tmp_path: Path) -> None:
         main(["--root", str(tmp_path / "typo")], fetch=lambda _url: PAGE)
 
     assert exit_code.value.code != 0
+
+
+def test_the_same_answer_decodes_the_same_way_compressed_or_not() -> None:
+    """The vendor may gzip an answer we did not ask to compress — the header decides."""
+    plain = PAGE.encode("utf-8")
+
+    assert decode_body(plain, None) == PAGE
+    assert decode_body(plain, "identity") == PAGE
+    assert decode_body(gzip.compress(plain), "gzip") == PAGE
+    assert decode_body(gzip.compress(plain), "GZIP") == PAGE, "header values are case-insensitive"
+
+    with pytest.raises(OSError):
+        decode_body(plain, "br")
+
+
+def test_one_failing_source_does_not_discard_the_others(tmp_path: Path) -> None:
+    """A defect on the second source must not erase what the first one showed."""
+    path = write_spec(tmp_path, recorded_sha(), second_source=True)
+    reworded = PAGE.replace("names the skill", "identifies the skill")
+
+    def fetch(url: str) -> str:
+        if url.startswith(SECOND_URL):
+            raise TypeError("a defect in our own code")
+        return reworded
+
+    with pytest.raises(CheckFailed) as failed:
+        check(load(path), fetch=fetch, today=TODAY)
+
+    assert [d.source_id for d in failed.value.found] == ["skills-frontmatter"]
+
+    with pytest.raises(CheckFailed):
+        main(["--root", str(tmp_path), "--write"], fetch=fetch)
+    assert [d.source_id for d in load(path).discrepancies] == ["skills-frontmatter"]
+
+
+def test_a_truncated_gzip_body_is_a_transport_failure(tmp_path: Path) -> None:
+    """A body that stops mid-stream is the server's failure, not a crash of the run."""
+    cut = gzip.compress(PAGE.encode("utf-8"))[:12]
+
+    with pytest.raises(OSError):
+        decode_body(cut, "gzip")
+
+    spec = load(write_spec(tmp_path, recorded_sha()))
+    found = check(spec, fetch=lambda _url: decode_body(cut, "gzip"), today=TODAY)
+    assert [d.kind for d in found] == [DiscrepancyKind.UNREACHABLE]
+
+
+class _Response:
+    """The part of an ``http.client`` response that ``_fetch`` uses."""
+
+    def __init__(self, body: bytes, headers: dict[str, str], status: int = 200) -> None:
+        self.status = status
+        self.headers = Message()
+        for name, value in headers.items():
+            self.headers[name] = value
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self) -> _Response:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+
+def test_fetch_asks_for_an_encoding_and_honours_the_one_it_gets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring under test is the header: what we ask for, and what we do with the answer."""
+    sent: list[Request] = []
+
+    def urlopen(request: Request, timeout: float = 0) -> _Response:
+        sent.append(request)
+        return _Response(gzip.compress(PAGE.encode("utf-8")), {"Content-Encoding": "gzip"})
+
+    monkeypatch.setattr(freshness, "urlopen", urlopen)
+
+    assert _fetch("https://example.invalid/docs/skills.md") == PAGE
+    assert sent[0].get_header("Accept-encoding") == "gzip, identity"
+
+    def refusing(request: Request, timeout: float = 0) -> _Response:
+        return _Response(b"nope", {}, status=503)
+
+    monkeypatch.setattr(freshness, "urlopen", refusing)
+    with pytest.raises(OSError, match="503"):
+        _fetch("https://example.invalid/docs/skills.md")

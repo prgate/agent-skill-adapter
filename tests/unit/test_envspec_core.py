@@ -136,7 +136,7 @@ def test_load_reads_a_valid_spec(tmp_path: Path) -> None:
 
 def test_load_rejects_an_unknown_field(tmp_path: Path) -> None:
     data = valid_spec()
-    data["capabilities"][0]["suport"] = "supported"
+    data["capabilities"][0]["supports"] = "supported"
     with pytest.raises(InvalidSpec):
         load(write_spec(tmp_path, data))
 
@@ -164,8 +164,8 @@ def test_load_rejects_a_source_without_anchor_or_hash(tmp_path: Path, field: str
 
 
 def test_digest_is_equal_for_decomposed_and_composed_forms() -> None:
-    composed = "caf\u00e9"  # e with acute, one code point
-    decomposed = "cafe\u0301"  # plain e followed by a combining acute
+    composed = "\u00e9"  # e with acute, one code point
+    decomposed = "e\u0301"  # plain e followed by a combining acute
     assert composed != decomposed, "the two spellings must differ before hashing"
     assert digest(composed) == digest(decomposed)
 

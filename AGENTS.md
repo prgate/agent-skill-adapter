@@ -53,18 +53,59 @@
 - **Documentation is not pinned by tests**: the structure and content of documents are verified by reading them in review.
 
 <!-- autopilot:start -->
-## Agent Skill Adapter — Autopilot Notes
+## Agent Skill Adapter
 
-Adapter that moves Claude Code agent configuration into Google Antigravity and reports what
-is lost in transit. Offline, deterministic. For skill authors and CI.
+Reads vendor documentation of two agent environments into machine-checkable YAML descriptions, then computes entry by entry what Google Antigravity does not reproduce from Claude Code. Offline and deterministic: same descriptions in, same report bytes out.
 
 ### Commands
+- `make install` — `uv sync`.
+- `make check` — the gate: ruff, `ruff format --check`, mypy strict over `src tests`, pytest.
+- `make test` / `make lint` / `make format` — subsets; one file is `uv run pytest tests/unit/test_envspec_gaps.py`.
+- `make pre-commit-run` — CI runs this before `make check`.
+- `uv run python -m agent_skill_adapter.envspec.gaps [--root specs] [--out specs/gaps]` — rebuild the gap report.
+- `uv run python -m agent_skill_adapter.envspec.freshness [--root specs] [--write]` — re-fetch vendor docs; the only command that uses the network.
+- `uv run agent-skill-adapter --version` — the installed CLI does nothing else yet.
 
-| Command | Purpose |
-|---------|---------|
-| `make install` | Install dependencies and dev tools |
-| `make check` | Lint, typecheck, tests |
-| `make test` | Run the test suite |
+### Structure
+- `src/agent_skill_adapter/envspec/` — all working code; `cli/main.py` is a typer app with no subcommands.
+- `specs/<vendor>/<environment>-<version>.yaml` — hand-written descriptions; `specs/gaps/` — generated, never hand-edited.
+- `contracts/`, `examples/`, `docs/adr/`, `tests/{e2e,transforms,fixtures}/` — `.gitkeep` placeholders; only `tests/unit/` holds tests.
+
+### Key files
+- `envspec/model.py` — the pydantic schema: `EnvSpec`, `Source`, `Capability`, `LayoutEntry`, `Limit`, `ToolName`, `InvisibleSource`, `Discrepancy`, `Support`, `DiscrepancyKind`.
+- `envspec/normalize.py` — `section_text(markdown, anchor)`, `normalize(text)`, `digest(text)`, `AnchorError`.
+- `envspec/loader.py` — `load(path)`, `load_all(root)`, `select(root, vendor, environment, version, *, allow_stale=False, today=None)`, `is_stale(spec, today)`, `capability(spec, capability_id) -> Support`; raises `InvalidSpec`, `InvalidVersion`, `SpecNotFound`, `AmbiguousSpec`, `StaleSpec`.
+- `envspec/gaps.py` — `compare(source, target) -> GapReport`, `render_markdown`, `render_json`, `report_from(root)`, `main`; `Outcome` is `reproduced|missing|unknown`.
+- `envspec/freshness.py` — `check(spec, *, fetch, today=None) -> list[Discrepancy]`, `record(path, discrepancies)`, `markdown_url(source)`, `main(argv=None, *, fetch=_fetch)`.
+
+### Architecture
+- An `EnvSpec` describes one environment over one `version_range`: `schema_version`, `vendor`, `environment`, `checked_at`, `stale_after_days` (30), `normalization: v1`, then `sources`, `capabilities`, `layout`, `limits`, `tool_names`, `invisible_sources`, `discrepancies`. The schema is closed (`extra="forbid"`), ids are unique per list, every `source_id` must name a declared source, and `ToolName` is `from`/`to` in YAML but `from_name`/`to_name` in Python.
+- A `Source` pins one documentation section by `anchor` and the sha256 of its normalized text; hashes are taken from the markdown twin `<url>.md`, never from HTML, because HTML moves with styling.
+- Flow: `load` → `select` by dotted-numeric version (the nearest description is never substituted) → `compare` matches source entries to target entries by id, within `capabilities` and `layout` only.
+- The outcome follows what the target documents: `supported` → reproduced, `unsupported` → missing, `unknown` or no such entry → unknown. Silence is never read as a denial, so an entry the target omits is never `missing`.
+- Staleness needs no network: a recorded discrepancy, or `checked_at` older than `stale_after_days`. `select` refuses a stale description unless `allow_stale=True`.
+- `freshness` is the only module allowed to import network libraries, and it takes `fetch` as a parameter so nothing below it — and no test — needs a network.
+
+### Code conventions
+- English everywhere except `.autopilot/` (Russian, the run record; excluded from ruff).
+- ruff `line-length = 100`, target py310, rules `E W F I B UP`; mypy strict covers `src` and `tests`.
+- Field names describe the description format, never one vendor's vocabulary — what an environment calls its own fields belongs in the YAML data.
+- A deliberate simplification carries a `# ponytail:` comment naming its ceiling and upgrade path.
+
+### Environment
+- Python 3.10 (`.python-version`), uv-managed `.venv`; no environment variables, no services, no secrets in the repository.
+- Dependencies: pydantic, pyyaml, typer, rich; dev: pytest, mypy, ruff, pre-commit. Adding another is CFP Level 3.
+
+### Tests
+- `make check` → ruff + mypy strict + 53 passed.
+- Four seams: `normalize` (text → hash), `loader` (tree → selection → staleness), `gaps` (`compare` on two tiny descriptions), `freshness` (injected `fetch`).
+
+### Pitfalls
+- `AGENTS.md` must stay at 120 lines or fewer and `CLAUDE.md`/`GEMINI.md` must remain symlinks to it, or `tests/unit/test_governance.py` fails.
+- Editing a description leaves `specs/gaps/*` behind; `test_committed_report_matches_the_descriptions_it_was_built_from` catches it and the fix is to re-run the `gaps` command.
+- Importing `urllib`/`http`/`socket`/`requests`/`httpx` anywhere but `freshness.py` fails `test_only_the_freshness_module_may_reach_the_network`.
+- Version comparison is dotted numbers only — no pre-release, no build metadata.
+- Exit codes read backwards on purpose: `gaps.main` returns 1 when nothing is missing or unknown (the transfer would be a file copy), while `freshness.main` returns 0 even with discrepancies found, and 2 only for a missing or empty root.
 
 ### How Autopilot works here
 
