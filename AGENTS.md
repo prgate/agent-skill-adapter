@@ -110,7 +110,7 @@ Reads vendor documentation of two agent environments into machine-checkable YAML
 - Importing `urllib`/`http`/`socket`/`requests`/`httpx` anywhere but `freshness.py` fails `test_only_the_freshness_module_may_reach_the_network`.
 - Version comparison is dotted numbers only — no pre-release, no build metadata.
 - Exit codes read backwards on purpose: `gaps.main` returns 1 when nothing is missing or unknown (the transfer would be a file copy), while `freshness.main` returns 0 even with discrepancies found, and 2 only for a missing or empty root.
-- `convert` exits 0/1/3 with the verdict, 6 when the folder is not a readable skill and 8 on a collision with an earlier result; 6 and 8 are not verdicts and leave the computed one alone. There is no code 2, and every outcome — refusals included — still prints a report, whose `error` field says why it is thin.
+- `convert` exits 0/1/3 with the verdict, 6 when the folder is not a readable skill, 7 when a destination would fall outside `--out`, 8 on a collision, 11 when `--report` could not be written; the last four are refusals, not verdicts, and leave the computed one alone — and 11 yields to any of the others. There is no code 2, and every outcome — refusals included — still prints a report, whose `error` field says why it is thin.
 
 ### How Autopilot works here
 Сборка ведётся навыком `/autopilot`: требования, спецификация и таски — в `.autopilot/`,
