@@ -10,6 +10,9 @@ Welcome to the **Agent Skill Adapter** documentation hub.
 ### Architecture Decision Records (ADR)
 - [ADR Index](adr/) — Architectural design decisions and rationale tracked using the MADR (Markdown Any Decision Records) v3.0 standard.
 
+### Runs
+- [Converting a real skill](converting-a-real-skill.md) — три прогона команды `convert` на скиллах из `~/.claude/skills/`: что переносится, что переносится с потерей и что упирается в «сведений недостаточно».
+
 ## 🧭 Repository Navigation
 - [Project Readme](../README.md) — что делает адаптер, схема работы и быстрый старт.
   Английская версия — [README.en.md](../README.en.md).

@@ -6,14 +6,17 @@ the environment descriptions. :func:`envspec.gaps.compare` has already judged ev
 of the source environment against the target, so nothing here compares anything: it looks
 up what the comparison concluded and applies the assembly table of PRD 5.2.
 
-Nothing is written to disk. ``out`` names the folder a later release will assemble the
-skill into; passing it now refuses loudly rather than reporting a transfer that never
-happened.
+Nothing is written without ``out``. With it, the skill is assembled under that folder at
+the paths the target description names -- every one of them read from its ``layout``, so
+that what this command believes about the target environment is only ever what the
+description says, and is re-checked when the description is.
 """
 
 from __future__ import annotations
 
 import codecs
+import json
+import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
@@ -24,6 +27,7 @@ import yaml
 
 from agent_skill_adapter.envspec.gaps import Gap, Origin, Outcome, compare
 from agent_skill_adapter.envspec.loader import base_specs, select
+from agent_skill_adapter.envspec.model import EnvSpec
 
 REPORT_SCHEMA = 1
 """Version of the report format below. A field that changes meaning changes this number."""
@@ -50,6 +54,9 @@ SEVERITY = (Verdict.CLEAN, Verdict.LOSSY, Verdict.UNDECIDABLE)
 EXIT_CODE = {Verdict.CLEAN: 0, Verdict.LOSSY: 1, Verdict.UNDECIDABLE: 3}
 UNREADABLE = 6
 """The skill folder could not be read at all, so there was nothing to judge."""
+
+COLLISION = 8
+"""Something is already at a destination this run would have written."""
 
 UNDECLARED = "no entry with this id in either description"
 """Why a property carries no words from either side: nobody documented it under that id."""
@@ -81,6 +88,42 @@ A target that documents the event says nothing by that about whether a hook of i
 refuse the tool call. Asked as one question, the event's `supported` would answer for both
 and the lost veto would never reach the report.
 """
+
+
+class Scope(str, Enum):
+    """Which level of the target environment the skill is assembled for.
+
+    ``project`` by default: writing into someone's home folder because no level was named
+    is changing their environment in passing.
+    """
+
+    PROJECT = "project"
+    USER = "user"
+
+
+SKILLS_ROOT = {Scope.PROJECT: "skills.project", Scope.USER: "skills.user"}
+HOOKS_FILE = {Scope.PROJECT: "hooks.project", Scope.USER: "hooks.user"}
+SKILL_FILE = "skill.file"
+DIRECTORY = "skill.dir."
+TOP = "skill.top."
+"""Ids of what the skill folder holds. `skill.file.*` is taken: those are the skill file's
+own fields, and a file called `README.md` is not one of them."""
+EVENT = "hook.event."
+"""Entry ids the assembly asks the target description for. Ids, and never paths.
+
+Every path this command writes to is read from the ``layout`` of the target description
+under one of these ids. A path spelled out here would be a claim about the target
+environment kept out of the freshness check that guards every other such claim.
+"""
+
+SKILL_NAME = "<skill-name>"
+WORKSPACE_ROOT = "<workspace-root>"
+HOME = "~"
+"""What a layout path may carry in place of a name or a root, expanded by the assembly."""
+
+SKILL_MD = "SKILL.md"
+HOOKS_KEY = "hooks"
+"""The file and the frontmatter key of the source environment this command opens by name."""
 
 
 class ConvertError(Exception):
@@ -216,27 +259,37 @@ def _frontmatter(path: Path) -> dict[str, Any]:
     return loaded
 
 
-def _findings(skill_dir: Path) -> list[Finding]:
+def _findings(skill_dir: Path) -> tuple[list[Finding], dict[str, Any]]:
     """Everything the folder holds that an environment has to reproduce, in the order found.
 
     Ids are built from the names as written -- ``skill.frontmatter.<key>``,
-    ``skill.dir.<name>``, ``hook.event.<name>`` -- and no table of known names is kept.
+    ``skill.dir.<name>``, ``skill.top.<name>``, ``hook.event.<name>`` -- and no table of
+    known names is kept.
     A name no description declares then reaches the report as a property nobody documented,
     which is the point: it must not vanish because we had not heard of it.
     """
     if not skill_dir.is_dir():
         raise ConvertError(f"{skill_dir}: no such folder", UNREADABLE)
-    front = _frontmatter(skill_dir / "SKILL.md")
+    front = _frontmatter(skill_dir / SKILL_MD)
     findings = [Finding(f"frontmatter key `{key}`", (f"skill.frontmatter.{key}",)) for key in front]
+    held = sorted(skill_dir.iterdir())
     findings += [
-        Finding(f"bundled directory `{entry.name}/`", (f"skill.dir.{entry.name}",))
-        for entry in sorted(skill_dir.iterdir())
+        Finding(f"bundled directory `{entry.name}/`", (f"{DIRECTORY}{entry.name}",))
+        for entry in held
         if entry.is_dir()
+    ]
+    # Everything else at the top of the folder, the skill file aside: a README, a licence, a
+    # diagram. Nothing says where they go in the target environment, and a file that fell out
+    # of the report would be content lost under an exit code that called the transfer clean.
+    findings += [
+        Finding(f"top-level file `{entry.name}`", (f"{TOP}{entry.name}",))
+        for entry in held
+        if not entry.is_dir() and entry.name != SKILL_MD
     ]
     # ponytail: hooks are read from the frontmatter alone, which is where a skill declares
     # its own. Workspace-level hook files belong to the workspace, not to one skill folder,
     # and this command takes one skill folder (R07); reading them arrives with the workspace.
-    declared = front.get("hooks")
+    declared = front.get(HOOKS_KEY)
     events = declared if isinstance(declared, Mapping) else {}
     findings += [
         Finding(
@@ -245,7 +298,7 @@ def _findings(skill_dir: Path) -> list[Finding]:
         )
         for event in events
     ]
-    return findings
+    return findings, front
 
 
 def _judge(
@@ -287,6 +340,165 @@ def _judge(
     return properties, advice
 
 
+def _layout(spec: EnvSpec, entry_id: str) -> str | None:
+    """The path the description gives ``entry_id``, or ``None`` when it names none."""
+    return next((entry.path for entry in spec.layout if entry.id == entry_id), None)
+
+
+def _destination(template: str, skill_name: str) -> tuple[str, str]:
+    """A layout path expanded twice: where it belongs, and where under ``out`` it is staged.
+
+    A layout path opens with the root it is measured from: the workspace root, or the home
+    folder for a user-level entry. The destination expands that root; the staged path drops
+    it, because nothing is ever written outside ``out`` -- a command asked what a transfer
+    costs must not reach into the caller's home folder on the way to answering.
+    """
+    path = template.replace(SKILL_NAME, skill_name)
+    if path.startswith(f"{WORKSPACE_ROOT}/"):
+        relative = path[len(WORKSPACE_ROOT) + 1 :]
+        return relative, relative
+    if path.startswith(f"{HOME}/"):
+        relative = path[len(HOME) + 1 :]
+        # Joined as text, not through Path: a destination is printed, not walked, and
+        # Path would drop the trailing slash that says the entry is a directory.
+        return f"{Path.home()}/{relative}", relative
+    return path, path
+
+
+@dataclass(frozen=True)
+class _Part:
+    """One file or directory of the assembled skill, and the two places it has."""
+
+    label: str
+    """Where it came from inside the skill folder."""
+    destination: str
+    """Where the target description says it belongs."""
+    staged: Path
+    """Where this run put it, always under ``out``."""
+    copied_from: Path | None = None
+    content: str | None = None
+    """Set instead of ``copied_from`` when the part is written rather than copied."""
+
+
+def _plan(
+    skill_dir: Path,
+    out: Path,
+    target: EnvSpec,
+    scope: Scope,
+    properties: Sequence[Property],
+    hooks: Mapping[str, Any],
+) -> tuple[list[_Part], list[str]]:
+    """What the assembly will write, before it writes anything, and what it asks of a person.
+
+    A part the target description names no path for is not assembled: guessing where it
+    goes would be inventing the target environment's layout. It keeps its row in the
+    report, which is where its fate is read.
+    """
+    root = _layout(target, SKILLS_ROOT[scope])
+    if root is None or _layout(target, SKILL_FILE) is None:
+        raise ConvertError(
+            f"{target.vendor}/{target.environment} names no place for a skill file at the "
+            f"{scope.value} level, so there is nowhere to assemble into",
+            EXIT_CODE[Verdict.UNDECIDABLE],
+        )
+    wanted = [(SKILL_FILE, SKILL_MD)]
+    wanted += [
+        (entry.id, f"{entry.id[len(DIRECTORY) :]}/")
+        for entry in properties
+        if entry.id.startswith(DIRECTORY)
+    ]
+    parts = []
+    for entry_id, label in wanted:
+        inside = _layout(target, entry_id)
+        if inside is None:
+            continue
+        destination, staged = _destination(f"{root.rstrip('/')}/{inside}", skill_dir.name)
+        parts.append(_Part(label, destination, out / staged, copied_from=skill_dir / label))
+    hook_part = _hook_part(out, target, scope, properties, hooks)
+    if hook_part is None:
+        return parts, []
+    return parts + [hook_part], [
+        f"the hook entry is staged at {hook_part.staged} and not merged into "
+        f"{hook_part.destination}: that file belongs to the whole target environment and may "
+        "already hold entries of its own, so add this one to it yourself"
+    ]
+
+
+def _hook_part(
+    out: Path,
+    target: EnvSpec,
+    scope: Scope,
+    properties: Sequence[Property],
+    hooks: Mapping[str, Any],
+) -> _Part | None:
+    """The hook entry to carry over: the declared events the target fires, and nothing else.
+
+    An event the target does not reproduce is left out of the file -- written there it would
+    read as a guarantee the target never gave. It keeps its row in the report either way.
+    """
+    fires = {entry.id for entry in properties if entry.verdict is Verdict.CLEAN}
+    carried = {name: value for name, value in hooks.items() if f"{EVENT}{name}" in fires}
+    destination = _layout(target, HOOKS_FILE[scope])
+    if not carried or destination is None:
+        return None
+    return _Part(
+        f"frontmatter key `{HOOKS_KEY}`",
+        destination,
+        # The entry is staged beside the assembled skill under the name the target gives the
+        # file it belongs in, never at the destination itself: merging into a file that may
+        # already hold someone else's entries is FR-40.
+        out / Path(destination).name,
+        content=json.dumps({HOOKS_KEY: carried}, indent=2, ensure_ascii=False) + "\n",
+    )
+
+
+def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
+    """Copy or write every planned part, once the whole plan is known to be safe to write.
+
+    Two questions are asked of every destination before the first byte of the first one is
+    written: is the place free, and is it under ``out``. Both run over the whole plan, because
+    a run that wrote two files and then refused the third would have done the damage it
+    refused to do.
+
+    A symbolic link counts as an occupied place even when it points at nothing: ``exists``
+    answers ``False`` for a broken one, and writing to it would create its target somewhere
+    the caller never named.
+    """
+    taken = [str(part.staged) for part in parts if part.staged.exists() or part.staged.is_symlink()]
+    if taken:
+        raise ConvertError(
+            "there is already something at " + ", ".join(taken) + "; nothing was written, "
+            "because a converted skill that silently replaced a result of an earlier run "
+            "is indistinguishable from one that was never converted",
+            COLLISION,
+        )
+    # `resolve` normalises `..` and follows links, so the three ways a destination can lead
+    # out of `out` -- a layout path that is absolute, a skill folder named `..`, a link on
+    # the way -- are one question asked once.
+    # ponytail: checked and then written as two steps, so a link planted in between is not
+    # caught; closing that needs writes that refuse to follow links (FR-14, path sandboxing).
+    root = out.resolve()
+    outside = [str(part.staged) for part in parts if not part.staged.resolve().is_relative_to(root)]
+    if outside:
+        raise ConvertError(
+            ", ".join(outside) + f" is not under {out}; nothing was written, because the one "
+            "promise this command makes about the caller's filesystem is that it writes "
+            "under the folder the caller named and nowhere else",
+            EXIT_CODE[Verdict.UNDECIDABLE],
+        )
+    for part in parts:
+        part.staged.parent.mkdir(parents=True, exist_ok=True)
+        if part.content is not None:
+            part.staged.write_text(part.content, encoding="utf-8")
+        elif part.copied_from is not None and part.copied_from.is_dir():
+            shutil.copytree(part.copied_from, part.staged)
+        elif part.copied_from is not None:
+            shutil.copy2(part.copied_from, part.staged)
+    return [
+        {"from": part.label, "to": part.destination, "path": str(part.staged)} for part in parts
+    ]
+
+
 def _environment(text: str | None) -> dict[str, str] | None:
     """``vendor/environment@version`` split in three, or ``None`` when it is not that."""
     if text is None:
@@ -311,7 +523,7 @@ def _requested(text: str | None, flag: str) -> dict[str, str]:
 
 def _gaps(
     root: str | Path, source: str | None, target: str | None, allow_stale: bool
-) -> dict[str, Gap]:
+) -> tuple[dict[str, Gap], EnvSpec]:
     """What the comparison of the two named descriptions concluded, by entry id.
 
     Selection is :func:`loader.select`, so its refusals stand and all of them mean the same
@@ -336,7 +548,7 @@ def _gaps(
             f"cannot read the environment descriptions under {root}: {error}",
             EXIT_CODE[Verdict.UNDECIDABLE],
         ) from error
-    return {gap.id: gap for gap in compare(source_spec, target_spec, bases).gaps}
+    return {gap.id: gap for gap in compare(source_spec, target_spec, bases).gaps}, target_spec
 
 
 def _report(
@@ -347,6 +559,7 @@ def _report(
     exit_code: int,
     properties: Sequence[Property],
     advice: Sequence[str],
+    written: Sequence[dict[str, str]],
     error: str | None,
 ) -> dict[str, Any]:
     """The machine-readable report. ``report_schema`` first, and ``error`` says why it is thin."""
@@ -370,9 +583,9 @@ def _report(
             }
             for entry in properties
         ],
-        # Empty until a release writes files. It is a field and not an omission because a
-        # reader has to be able to tell "wrote nothing" from "this report is of an older shape".
-        "written": [],
+        # Empty without `out`. It is a field and not an omission because a reader has to be
+        # able to tell "wrote nothing" from "this report is of an older shape".
+        "written": list(written),
         "advice": list(advice),
         # Not in the report sketch of the specification, and needed by the rule that a report
         # is issued on every outcome: a refusal whose reason reached only the error stream
@@ -392,6 +605,9 @@ def _summary(report: dict[str, Any]) -> str:
         f"({entry['outcome']}, {entry['origin']})" + (f"; {entry['note']}" if entry["note"] else "")
         for entry in report["properties"]
     ]
+    lines += [
+        f"  wrote {entry['path']} (it belongs at {entry['to']})" for entry in report["written"]
+    ]
     lines += [f"  advice: {line}" for line in report["advice"]]
     return "\n".join(lines) + "\n"
 
@@ -403,6 +619,7 @@ def convert(
     *,
     root: str | Path = "specs",
     out: str | Path | None = None,
+    scope: Scope = Scope.PROJECT,
     allow_stale: bool = False,
 ) -> Conversion:
     """Read the skill folder, judge every property it holds, and report what a transfer costs.
@@ -413,25 +630,58 @@ def convert(
     at exit code 6. Both still produce a report: a run that refuses and says nothing
     machine-readable about the refusal cannot be acted on by whatever called it.
 
-    ``out`` is the folder a converted skill will be assembled into. It is not implemented:
-    passing it raises rather than reporting a transfer that did not happen.
+    Without ``out`` nothing is written and the report is the whole answer. With it, the skill
+    is assembled under ``out`` at the paths the target description names, at the level
+    ``scope`` chooses.
     """
-    if out is not None:
-        raise NotImplementedError(
-            "convert(out=...) is not implemented: this release reads and judges a skill and "
-            "writes nothing. Call it without `out` and read the report."
-        )
     skill_dir = Path(skill_dir)
+    properties: list[Property] = []
+    advice: list[str] = []
+    written: list[dict[str, str]] = []
+    # Until the assembly table has judged something there is no verdict to keep, and
+    # "we could not read enough to say" is what `undecidable` means. Once it has, that
+    # verdict stands even if the run then fails to write: being unable to put the files
+    # somewhere is not a judgement about what the skill loses in the transfer.
+    verdict = Verdict.UNDECIDABLE
     try:
-        gaps = _gaps(root, source, target, allow_stale)
-        properties, advice = _judge(_findings(skill_dir), gaps)
+        gaps, target_spec = _gaps(root, source, target, allow_stale)
+        findings, front = _findings(skill_dir)
+        properties, advice = _judge(findings, gaps)
+        verdict = worst(entry.verdict for entry in properties)
+        # An undecidable run assembles nothing: the transferable half of a skill whose other
+        # half nobody documented is a folder that looks converted and is not.
+        if out is not None and verdict is not Verdict.UNDECIDABLE:
+            declared = front.get(HOOKS_KEY)
+            parts, asked = _plan(
+                skill_dir,
+                Path(out),
+                target_spec,
+                scope,
+                properties,
+                declared if isinstance(declared, Mapping) else {},
+            )
+            written = _assemble(Path(out), parts)
+            advice += asked
     except ConvertError as error:
-        report = _report(
-            skill_dir, source, target, Verdict.UNDECIDABLE, error.exit_code, (), (), str(error)
+        # A refusal that exits with one of the table's own codes is that verdict: not
+        # knowing where the skill goes is not knowing what the transfer amounts to. Codes 6
+        # and 8 are not verdicts, and leave the one the table computed as it is.
+        verdict = next(
+            (name for name, code in EXIT_CODE.items() if code == error.exit_code), verdict
         )
-        return Conversion(Verdict.UNDECIDABLE, error.exit_code, report, _summary(report))
-    verdict = worst(entry.verdict for entry in properties)
+        report = _report(
+            skill_dir,
+            source,
+            target,
+            verdict,
+            error.exit_code,
+            properties,
+            advice,
+            written,
+            str(error),
+        )
+        return Conversion(verdict, error.exit_code, report, _summary(report))
     report = _report(
-        skill_dir, source, target, verdict, EXIT_CODE[verdict], properties, advice, None
+        skill_dir, source, target, verdict, EXIT_CODE[verdict], properties, advice, written, None
     )
     return Conversion(verdict, EXIT_CODE[verdict], report, _summary(report))

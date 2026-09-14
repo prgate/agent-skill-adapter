@@ -56,17 +56,27 @@ def convert_command(
         Path | None,
         typer.Option(help="Write the JSON report here instead of to standard output."),
     ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help="Assemble the skill under this folder. Without it, nothing is written."),
+    ] = None,
+    scope: Annotated[
+        convert_module.Scope,
+        typer.Option(help="Which level of the target environment the layout is taken from."),
+    ] = convert_module.Scope.PROJECT,
     allow_stale: Annotated[
         bool, typer.Option(help="Read a description that is due for a re-check.")
     ] = False,
 ) -> None:
-    """Report what transferring one skill folder to another environment costs.
+    """Report what transferring one skill folder to another environment costs, and do it.
 
     Standard output carries the JSON report and nothing else, so a caller can pipe it; the
-    same run in words goes to the error stream. Nothing is written to the skill or to the
-    target environment: this release reads and judges, and the exit code is the answer.
+    same run in words goes to the error stream. Nothing is written to the skill or anywhere
+    else unless `--out` names a folder to assemble into, and then only under that folder.
     """
-    result = convert_module.convert(skill_dir, source, target, root=specs, allow_stale=allow_stale)
+    result = convert_module.convert(
+        skill_dir, source, target, root=specs, out=out, scope=scope, allow_stale=allow_stale
+    )
     payload = json.dumps(result.report, indent=2, ensure_ascii=False) + "\n"
     if report is None:
         sys.stdout.write(payload)
