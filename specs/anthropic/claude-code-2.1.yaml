@@ -5,6 +5,17 @@ schema_version: 1
 vendor: anthropic
 environment: claude-code
 version_range: ">=2.1.0,<2.2.0"
+# Claude Code declares itself an implementation of the open Agent Skills format, so every
+# entry `specs/agentskills/agent-skills-1.0.yaml` declares is part of this environment too,
+# and the gap report can say which of its entries an open format already promises and which
+# are Claude Code's own. The declaration is the vendor's own words, pinned by the source
+# `skills-open-standard` below: "Claude Code accepts all six fields, so frontmatter that
+# follows the spec loads in Claude Code without changes". The page says it more plainly still
+# in its opening paragraph -- "Claude Code skills follow the Agent Skills open standard ...
+# Claude Code extends the standard with additional features" -- but no heading closes that
+# paragraph, so its section is the entire page and its hash would move on any edit anywhere.
+# The narrower section states the same claim field by field and is what we can re-check.
+extends: agentskills/agent-skills@1.0
 checked_at: 2026-09-14
 stale_after_days: 30
 normalization: v1
@@ -15,6 +26,15 @@ sources:
     markdown_url: https://code.claude.com/docs/en/skills.md
     anchor: "Frontmatter reference"
     sha256: "75e8a5dd8482d69aef341ee608c1a0666061b0847f723aa438f56425a77fc5ee"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  # Cited by `extends` above. `extends` takes no `source_id` of its own in the schema, so
+  # this source is named in the comment there instead; a freshness run still re-checks it.
+  - id: skills-open-standard
+    url: https://code.claude.com/docs/en/skills
+    markdown_url: https://code.claude.com/docs/en/skills.md
+    anchor: "Using skill frontmatter outside Claude Code"
+    sha256: "45d76c54c44e9ddf033550f4b6ddcee7d9430f63179ed24e7b88e389d4b62fed"
     checked_at: 2026-09-14
     environment_version: "2.1.270"
   - id: skills-content-lifecycle

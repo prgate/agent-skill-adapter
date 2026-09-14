@@ -16,7 +16,13 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from agent_skill_adapter.envspec.loader import capability, select
+from agent_skill_adapter.envspec.loader import (
+    Entries,
+    base_specs,
+    capability,
+    is_inherited,
+    select,
+)
 from agent_skill_adapter.envspec.model import EnvSpec, Support
 
 
@@ -28,6 +34,24 @@ class Outcome(str, Enum):
     UNKNOWN = "unknown"
     OUT_OF_SCOPE = "out-of-scope"
     """The source environment does not hold the entry either, so there is nothing to reproduce."""
+
+
+class Origin(str, Enum):
+    """Where one entry of the source environment comes from."""
+
+    SPECIFICATION = "specification"
+    """The open specification the source environment declares it implements declares it too.
+
+    Every other implementation of that format is expected to carry the entry, so a target
+    that is silent about it is silent about something it has already claimed to support.
+    """
+
+    EXTENSION = "extension"
+    """The source environment's own addition, which no open format ever promised elsewhere.
+
+    Also what every entry is when the source environment declares no format at all: with
+    nothing extended, nothing is owed by anyone but the environment itself.
+    """
 
 
 NO_ENTRY = "(no matching entry in the target description)"
@@ -52,6 +76,8 @@ class Gap:
     source_support: Support
     target_support: Support
     outcome: Outcome
+    origin: Origin = Origin.EXTENSION
+    """Whether an extended specification declares this entry, or the source environment alone."""
     matched: bool = True
     """Whether the target description carries an entry with this id at all."""
     source_note: str | None = None
@@ -65,18 +91,29 @@ class GapReport:
     source: EnvSpec
     target: EnvSpec
     gaps: tuple[Gap, ...]
+    bases: tuple[EnvSpec, ...] = ()
+    """The open specifications ``source`` declares it implements, nearest first; often empty."""
 
-    def count(self, outcome: Outcome, *, matched: bool | None = None) -> int:
-        """How many entries ended in ``outcome``, optionally only the matched or unmatched ones.
+    def count(
+        self, outcome: Outcome, *, matched: bool | None = None, origin: Origin | None = None
+    ) -> int:
+        """How many entries ended in ``outcome``, narrowed by ``matched`` and ``origin``.
 
         ``matched=False`` counts the entries the target description does not carry at all.
         Those are evidence about the target; the rest of ``unknown`` is the limit of our
         reading of someone else's documentation, and the two must not be added up silently.
+
+        ``origin`` splits the same outcome by who owes the entry. An ``unknown`` on a
+        specification field is a target silent about a format it claims to implement; an
+        ``unknown`` on an extension is the ordinary price of moving between two products.
+        One number covering both would report the second as if it were the first.
         """
         return sum(
             1
             for gap in self.gaps
-            if gap.outcome is outcome and (matched is None or gap.matched is matched)
+            if gap.outcome is outcome
+            and (matched is None or gap.matched is matched)
+            and (origin is None or gap.origin is origin)
         )
 
     @property
@@ -85,7 +122,7 @@ class GapReport:
         return bool(self.count(Outcome.MISSING) or self.count(Outcome.UNKNOWN))
 
 
-def compare(source: EnvSpec, target: EnvSpec) -> GapReport:
+def compare(source: EnvSpec, target: EnvSpec, bases: Sequence[EnvSpec] = ()) -> GapReport:
     """Match every entry of ``source`` against ``target`` by id and judge the outcome.
 
     Entries are matched by id within their own list: a capability against the target's
@@ -111,6 +148,13 @@ def compare(source: EnvSpec, target: EnvSpec) -> GapReport:
 
     A layout entry carries no support value of its own: the target either documents that
     place (``reproduced``) or does not (``unknown``).
+
+    ``bases`` are the descriptions ``source`` extends -- the open specification it declares
+    it implements -- and they decide each entry's :class:`Origin`, by id and by nothing else.
+    A base description states what a *format* defines, so its own ``support`` answers a
+    different question than an environment's ("the format defines this field" against "this
+    product acts on it") and is never read here. Nothing else about ``bases`` reaches the
+    comparison: the outcome still comes from the two environments alone.
     """
     target_notes = {entry.id: entry.note for entry in target.capabilities}
     target_layout = {entry.id: entry.path for entry in target.layout}
@@ -128,6 +172,7 @@ def compare(source: EnvSpec, target: EnvSpec) -> GapReport:
                     if entry.support is Support.SUPPORTED
                     else Outcome.OUT_OF_SCOPE
                 ),
+                origin=_origin(bases, entry.id, "capabilities"),
                 matched=entry.id in target_notes,
                 source_note=entry.note,
                 target_note=target_notes.get(entry.id) if entry.id in target_notes else NO_ENTRY,
@@ -143,12 +188,20 @@ def compare(source: EnvSpec, target: EnvSpec) -> GapReport:
                 source_support=Support.SUPPORTED,
                 target_support=support,
                 outcome=_FROM_SUPPORT[support],
+                origin=_origin(bases, place.id, "layout"),
                 matched=there is not None,
                 source_note=place.path,
                 target_note=there if there is not None else NO_ENTRY,
             )
         )
-    return GapReport(source=source, target=target, gaps=tuple(sorted(gaps, key=_order)))
+    return GapReport(
+        source=source, target=target, gaps=tuple(sorted(gaps, key=_order)), bases=tuple(bases)
+    )
+
+
+def _origin(bases: Sequence[EnvSpec], entry_id: str, among: Entries) -> Origin:
+    """Membership by id in the same list of one of the extended descriptions, and nothing more."""
+    return Origin.SPECIFICATION if is_inherited(bases, entry_id, among=among) else Origin.EXTENSION
 
 
 def _order(gap: Gap) -> tuple[str, str]:
@@ -169,7 +222,13 @@ _INTRO = (
     "two together would let our own incompleteness pass for a finding. `out-of-scope` is a "
     "field the source environment documents as accepted and inert: it has no behaviour to "
     "carry over, so it is neither a gap nor something the target can be credited with "
-    "reproducing."
+    "reproducing. The `origin` column says who owes the entry: `specification` marks an entry "
+    "the open format named above declares, so every implementation of that format is expected "
+    "to carry it, and `extension` marks the source environment's own addition, which nobody "
+    "promised anywhere else. That split is what the `unknown` count needs most -- a target "
+    "silent about a specification field is silent about a format it claims to implement, while "
+    "a silent extension is the ordinary price of moving between two different products, and "
+    "one number covering both would report the second as if it were the first."
 )
 
 
@@ -187,7 +246,11 @@ def render_json(report: GapReport) -> str:
     payload = {
         "source": _describe(report.source),
         "target": _describe(report.target),
+        "specification": [_describe(base) for base in report.bases],
         "counts": {outcome.value: report.count(outcome) for outcome in Outcome},
+        "declared_by_specification": {
+            outcome.value: report.count(outcome, origin=Origin.SPECIFICATION) for outcome in Outcome
+        },
         "absent_from_target": {
             outcome.value: report.count(outcome, matched=False) for outcome in Outcome
         },
@@ -198,6 +261,7 @@ def render_json(report: GapReport) -> str:
                 "source_support": gap.source_support.value,
                 "target_support": gap.target_support.value,
                 "outcome": gap.outcome.value,
+                "origin": gap.origin.value,
                 "matched": gap.matched,
                 "source_note": gap.source_note,
                 "target_note": gap.target_note,
@@ -239,23 +303,34 @@ def render_markdown(report: GapReport) -> str:
         f"checked {source.checked_at.isoformat()}",
         f"- Target: `{target.vendor}/{target.environment}` {target.version_range}, "
         f"checked {target.checked_at.isoformat()}",
-        "",
-        "| outcome | entries | of which absent from the target description |",
-        "| --- | --- | --- |",
     ]
     lines += [
-        f"| {outcome.value} | {report.count(outcome)} | {report.count(outcome, matched=False)} |"
+        f"- Open specification the source declares it implements: "
+        f"`{base.vendor}/{base.environment}` {base.version_range}, "
+        f"checked {base.checked_at.isoformat()}"
+        for base in report.bases
+    ]
+    lines += [
+        "",
+        "| outcome | entries | of which declared by the open specification "
+        "| of which absent from the target description |",
+        "| --- | --- | --- | --- |",
+    ]
+    lines += [
+        f"| {outcome.value} | {report.count(outcome)} "
+        f"| {report.count(outcome, origin=Origin.SPECIFICATION)} "
+        f"| {report.count(outcome, matched=False)} |"
         for outcome in Outcome
     ]
     lines += [
         "",
         "## Entries",
         "",
-        "| id | kind | source | target | outcome | what each side documents |",
+        "| id | kind | origin | source | target | outcome | what each side documents |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
     lines += [
-        f"| {gap.id} | {gap.kind} | {gap.source_support.value} | "
+        f"| {gap.id} | {gap.kind} | {gap.origin.value} | {gap.source_support.value} | "
         f"{gap.target_support.value} | {gap.outcome.value} | {_note_cell(gap)} |"
         for gap in report.gaps
     ]
@@ -288,10 +363,9 @@ def report_from(
     version raises ``SpecNotFound``, more than one raises ``AmbiguousSpec`` rather than
     picking, and a stale winner raises ``StaleSpec`` unless ``allow_stale`` is set.
     """
-    return compare(
-        select(root, *SOURCE, source_version, allow_stale=allow_stale),
-        select(root, *TARGET, target_version, allow_stale=allow_stale),
-    )
+    source = select(root, *SOURCE, source_version, allow_stale=allow_stale)
+    target = select(root, *TARGET, target_version, allow_stale=allow_stale)
+    return compare(source, target, base_specs(source, root, allow_stale=allow_stale))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -328,8 +402,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     counts = []
     for outcome in Outcome:
+        detail = []
+        declared = report.count(outcome, origin=Origin.SPECIFICATION)
+        if declared:
+            detail.append(f"{declared} declared by the open specification")
         absent = report.count(outcome, matched=False)
-        tail = f" ({absent} absent from the target description)" if absent else ""
+        if absent:
+            detail.append(f"{absent} absent from the target description")
+        tail = f" ({', '.join(detail)})" if detail else ""
         counts.append(f"{outcome.value} {report.count(outcome)}{tail}")
     summary = ", ".join(counts)
     print(f"{out / stem}.{{md,json}}: {len(report.gaps)} entries -- {summary}")

@@ -13,6 +13,7 @@ import yaml
 from agent_skill_adapter.envspec.gaps import (
     NO_ENTRY,
     NO_WORDING,
+    Origin,
     Outcome,
     compare,
     main,
@@ -173,12 +174,64 @@ def test_markdown_keeps_one_row_per_entry() -> None:
 
     rows = [line for line in text.splitlines() if line.startswith("| alpha.field ")]
     assert len(rows) == 1
-    assert rows[0].count("|") - rows[0].count("\\|") == 7
+    assert rows[0].count("|") - rows[0].count("\\|") == 8
     assert "\\|" in rows[0]
     assert rows[0].endswith(f"| {NO_WORDING} -> pipes \\| and lines |")
 
     absent = [line for line in text.splitlines() if line.startswith("| zeta.field ")]
     assert NO_ENTRY in absent[0]
+
+
+def test_origin_says_who_declares_the_entry_not_who_acts_on_it() -> None:
+    """Silence about a field of the extended format is other news than silence about an extension.
+
+    The base description states what a *format* defines, so its ``support`` answers a
+    different question than an environment's and must not decide the origin: the first entry
+    below is declared by the format and recorded there as ``unsupported``, and it is still
+    ``specification``. Membership is by id within the entry's own list: a place the format
+    declares is inherited (``skill.file``), and a place whose name the format uses for a
+    *field* is not (``skill.body.content`` -- the format said nothing about a directory).
+    """
+    source = build(
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": Support.SUPPORTED},
+            {"id": "skill.frontmatter.effort", "support": Support.SUPPORTED},
+        ],
+        layout=[
+            {"id": "skill.file", "path": "skills/<name>/SKILL.md"},
+            {"id": "skills.user", "path": "~/.claude/skills/"},
+            {"id": "skill.body.content", "path": "skills/<name>/body/"},
+        ],
+    )
+    target = build(vendor="google", environment="antigravity", capabilities=[])
+    base = build(
+        vendor="agentskills",
+        environment="agent-skills",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": Support.UNSUPPORTED},
+            {"id": "skill.body.content", "support": Support.SUPPORTED},
+        ],
+        layout=[{"id": "skill.file", "path": "<skill-name>/SKILL.md"}],
+    )
+
+    report = compare(source, target, [base])
+
+    assert {gap.id: gap.origin for gap in report.gaps} == {
+        "skill.frontmatter.name": Origin.SPECIFICATION,
+        "skill.frontmatter.effort": Origin.EXTENSION,
+        "skill.file": Origin.SPECIFICATION,
+        "skills.user": Origin.EXTENSION,
+        "skill.body.content": Origin.EXTENSION,
+    }
+    assert report.count(Outcome.UNKNOWN) == 5
+    assert report.count(Outcome.UNKNOWN, origin=Origin.SPECIFICATION) == 2
+
+    payload = json.loads(render_json(report))
+    assert payload["declared_by_specification"]["unknown"] == 2
+    assert [gap["origin"] for gap in payload["gaps"] if gap["id"] == "skills.user"] == ["extension"]
+    assert [base["environment"] for base in payload["specification"]] == ["agent-skills"]
 
 
 ARGS = ["--source-version", "1.0.0", "--target-version", "1.0.0", "--allow-stale"]

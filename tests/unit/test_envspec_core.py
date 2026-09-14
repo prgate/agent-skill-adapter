@@ -204,3 +204,24 @@ def test_section_text_needs_a_closing_fence_as_long_as_the_opening_one() -> None
     assert "not a heading" in section, "a shorter marker does not close a longer fence"
     assert "after the block" in section
     assert "other text" not in section
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "agentskills/agent-skills",  # no version
+        "agent-skills@1.0",  # no vendor
+        "agentskills/agent-skills@1.0-beta",  # not a dotted numeric version
+        "agentskills/agent-skills@latest",
+        "agentskills/agent skills@1.0",
+        "agentskills/agent-skills@1.0 ",
+    ],
+)
+def test_load_rejects_a_reference_that_is_not_vendor_environment_at_version(
+    tmp_path: Path, broken: str
+) -> None:
+    """``extends`` must name one description exactly, or the loader has nowhere to go."""
+    data = valid_spec()
+    data["extends"] = broken
+    with pytest.raises(InvalidSpec):
+        load(write_spec(tmp_path, data))

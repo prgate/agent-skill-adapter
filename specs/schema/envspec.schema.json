@@ -1,0 +1,410 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "Capability": {
+      "additionalProperties": false,
+      "description": "One documented property of the environment.",
+      "properties": {
+        "source_id": {
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "skill-field",
+            "subagent-field",
+            "hook-event",
+            "settings-file"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "support": {
+          "$ref": "#/$defs/Support"
+        },
+        "since_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since Version"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "source_id",
+        "id",
+        "kind",
+        "support"
+      ],
+      "title": "Capability",
+      "type": "object"
+    },
+    "Discrepancy": {
+      "additionalProperties": false,
+      "description": "A source that no longer confirms its entry.",
+      "properties": {
+        "source_id": {
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DiscrepancyKind"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        }
+      },
+      "required": [
+        "source_id",
+        "kind"
+      ],
+      "title": "Discrepancy",
+      "type": "object"
+    },
+    "DiscrepancyKind": {
+      "description": "Why a source no longer confirms its entry. Both kinds come from a freshness run.",
+      "enum": [
+        "changed",
+        "unreachable"
+      ],
+      "title": "DiscrepancyKind",
+      "type": "string"
+    },
+    "InvisibleSource": {
+      "additionalProperties": false,
+      "description": "A configuration source the adapter cannot see.",
+      "properties": {
+        "source_id": {
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "id",
+        "path"
+      ],
+      "title": "InvisibleSource",
+      "type": "object"
+    },
+    "LayoutEntry": {
+      "additionalProperties": false,
+      "description": "Where the environment keeps a kind of its files.",
+      "properties": {
+        "source_id": {
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "id",
+        "path"
+      ],
+      "title": "LayoutEntry",
+      "type": "object"
+    },
+    "Limit": {
+      "additionalProperties": false,
+      "description": "A documented size limit, with the unit it is measured in.",
+      "properties": {
+        "source_id": {
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "value": {
+          "minimum": 0,
+          "title": "Value",
+          "type": "integer"
+        },
+        "unit": {
+          "enum": [
+            "bytes",
+            "characters",
+            "tokens"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "id",
+        "value",
+        "unit"
+      ],
+      "title": "Limit",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "description": "A documentation section an entry is taken from.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "markdown_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Markdown Url"
+        },
+        "anchor": {
+          "minLength": 1,
+          "title": "Anchor",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "checked_at": {
+          "format": "date",
+          "title": "Checked At",
+          "type": "string"
+        },
+        "environment_version": {
+          "minLength": 1,
+          "title": "Environment Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "url",
+        "anchor",
+        "sha256",
+        "checked_at",
+        "environment_version"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "Support": {
+      "description": "What the environment documentation says about a capability.",
+      "enum": [
+        "supported",
+        "unsupported",
+        "unknown"
+      ],
+      "title": "Support",
+      "type": "string"
+    },
+    "ToolName": {
+      "additionalProperties": false,
+      "description": "How a tool name of one environment is spelled in another.",
+      "properties": {
+        "source_id": {
+          "minLength": 1,
+          "title": "Source Id",
+          "type": "string"
+        },
+        "from": {
+          "minLength": 1,
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "minLength": 1,
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "from",
+        "to"
+      ],
+      "title": "ToolName",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One environment description, valid for one range of environment versions.",
+  "properties": {
+    "schema_version": {
+      "minimum": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "vendor": {
+      "minLength": 1,
+      "title": "Vendor",
+      "type": "string"
+    },
+    "environment": {
+      "minLength": 1,
+      "title": "Environment",
+      "type": "string"
+    },
+    "version_range": {
+      "minLength": 1,
+      "title": "Version Range",
+      "type": "string"
+    },
+    "extends": {
+      "anyOf": [
+        {
+          "pattern": "^[^/@\\s]+/[^/@\\s]+@\\d+(\\.\\d+)*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Extends"
+    },
+    "checked_at": {
+      "format": "date",
+      "title": "Checked At",
+      "type": "string"
+    },
+    "stale_after_days": {
+      "default": 30,
+      "minimum": 0,
+      "title": "Stale After Days",
+      "type": "integer"
+    },
+    "normalization": {
+      "const": "v1",
+      "title": "Normalization",
+      "type": "string"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/Source"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "capabilities": {
+      "items": {
+        "$ref": "#/$defs/Capability"
+      },
+      "title": "Capabilities",
+      "type": "array"
+    },
+    "layout": {
+      "items": {
+        "$ref": "#/$defs/LayoutEntry"
+      },
+      "title": "Layout",
+      "type": "array"
+    },
+    "limits": {
+      "items": {
+        "$ref": "#/$defs/Limit"
+      },
+      "title": "Limits",
+      "type": "array"
+    },
+    "tool_names": {
+      "items": {
+        "$ref": "#/$defs/ToolName"
+      },
+      "title": "Tool Names",
+      "type": "array"
+    },
+    "invisible_sources": {
+      "items": {
+        "$ref": "#/$defs/InvisibleSource"
+      },
+      "title": "Invisible Sources",
+      "type": "array"
+    },
+    "discrepancies": {
+      "items": {
+        "$ref": "#/$defs/Discrepancy"
+      },
+      "title": "Discrepancies",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "vendor",
+    "environment",
+    "version_range",
+    "checked_at",
+    "normalization",
+    "sources"
+  ],
+  "title": "EnvSpec",
+  "type": "object"
+}

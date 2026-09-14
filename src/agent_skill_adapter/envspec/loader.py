@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import ValidationError
@@ -30,6 +32,10 @@ class AmbiguousSpec(ValueError):
 
 class StaleSpec(ValueError):
     """Raised when the selected description is stale and staleness was not waived."""
+
+
+class ExtendsCycle(ValueError):
+    """Raised when descriptions extend one another in a loop."""
 
 
 def load(path: str | Path) -> EnvSpec:
@@ -184,3 +190,72 @@ def select(
             f"discrepancies {len(spec.discrepancies)})"
         )
     return spec
+
+
+def base_specs(
+    spec: EnvSpec,
+    root: str | Path,
+    *,
+    allow_stale: bool = False,
+    today: date | None = None,
+) -> tuple[EnvSpec, ...]:
+    """The descriptions ``spec`` extends, nearest first; empty when it extends nothing.
+
+    The whole chain, not one step: a description that is a layer over an open specification
+    may itself be layered over, and an entry of the furthest description is inherited just
+    the same. Resolution is :func:`select` on the ``<vendor>/<environment>@<version>``
+    reference, so its refusals stand -- a reference no description covers raises
+    :class:`SpecNotFound`, and a stale base raises :class:`StaleSpec` unless waived.
+    A chain that comes back to a reference already followed raises :class:`ExtendsCycle`
+    rather than walking forever.
+    """
+    chain: list[EnvSpec] = []
+    followed: list[str] = []
+    current = spec
+    while current.extends is not None:
+        reference = current.extends
+        holder = f"{current.vendor}/{current.environment}"
+        if reference in followed:
+            raise ExtendsCycle(
+                f"{spec.vendor}/{spec.environment} extends itself through "
+                f"{' -> '.join([*followed, reference])}"
+            )
+        followed.append(reference)
+        # The form of the reference is checked by the schema, so the split cannot surprise us.
+        vendor_environment, _, version = reference.partition("@")
+        vendor, _, environment = vendor_environment.partition("/")
+        try:
+            current = select(
+                root, vendor, environment, version, allow_stale=allow_stale, today=today
+            )
+        except SpecNotFound as error:
+            raise SpecNotFound(f"{holder} extends {reference!r}: {error}") from error
+        chain.append(current)
+    return tuple(chain)
+
+
+Entries = Literal["capabilities", "layout"]
+"""Which list of a description an entry sits in. Ids are unique inside one list, not across."""
+
+
+def is_inherited(bases: Sequence[EnvSpec], entry_id: str, *, among: Entries) -> bool:
+    """Whether ``among`` of one of ``bases`` declares ``entry_id``.
+
+    True means the entry belongs to the specification the environment is a layer over, so
+    every other implementation of that specification is expected to carry it; false means
+    the entry is that environment's own extension, which nobody else ever promised. The two
+    are different news about a target environment that says nothing about the entry, and
+    without this the report cannot tell them apart.
+
+    ``among`` is required because a description's ids are unique per list and nothing stops
+    the same name from naming a capability in one list and a place in the other. A layout
+    entry is inherited from the base's ``layout`` alone, a capability from its
+    ``capabilities`` alone: a format that declares a *field* called ``skill.body.content``
+    has said nothing about a *directory* of that name, and one shared id space would report
+    it as though it had.
+    """
+    return any(
+        entry_id
+        in {entry.id for entry in (base.capabilities if among == "capabilities" else base.layout)}
+        for base in bases
+    )

@@ -1,0 +1,192 @@
+# The open Agent Skills specification: the format both environments claim to implement.
+# Every entry is taken from https://agentskills.io/specification; hashes are computed over
+# the markdown version of the page (`<url>.md`), normalization v1.
+#
+# THIS DESCRIBES A FORMAT, NOT AN ENVIRONMENT, and `support` is read accordingly.
+# `supported` here means "the specification defines this as part of the format". In an
+# environment description, such as `specs/anthropic/claude-code-2.1.yaml`, the same word means
+# "this product acts on it" -- which is why that file records `license` and `metadata` as
+# `unsupported`, accepted and inert, while this one records both as defined. The two readings
+# are not interchangeable, so this description must not be put in the place of the source or
+# the target environment of a comparison: `gaps.compare` reads `Support` mechanically, and
+# the answer it would return -- whether a product reproduces a document -- is a question
+# nobody asked. This file is the shared baseline the environment descriptions are written
+# against, not a party to the gap report.
+#
+# The specification publishes no version number of its own: no version header, no changelog,
+# and the upstream repository carries neither a release nor a tag. `1.0` here is this
+# repository's label for the format as published on `checked_at`, in both `version_range` and
+# every `environment_version`; what actually pins the content is the sha256 of each section.
+# The upper bound is not a documented boundary either -- it only keeps this description from
+# claiming to cover a future rewrite of the format.
+#
+# Every section of the page that states a rule of the format, and where it is recorded here:
+#   "`SKILL.md` format" -> `capabilities`; the section is the parent of the two below it, so
+#     its source overlaps theirs and is pinned for the obligation it states before them
+#   `Directory structure`, `Optional directories`  -> `layout`
+#   `Frontmatter` (the table and its six per-field subsections) -> `capabilities`, `limits`
+#   `Body content`, `File references` -> `capabilities`, see the comment above those entries
+# Two sections state no rule a skill can break, and are deliberately left out:
+#   `Progressive disclosure` -- it describes how an agent loads a skill rather than what a
+#     skill may contain, and its figures are recommendations ("< 5000 tokens recommended",
+#     "under 500 lines"); `Limit.unit` is closed to bytes / characters / tokens anyway, so a
+#     count of lines would have nowhere to go.
+#   `Validation` -- it recommends an external tool (`skills-ref`), it constrains no skill.
+#
+# The four `layout` entries are matched by nothing today, and are recorded ahead of their
+# consumer. `gaps.compare` walks the ids of the *source* description, and these ids are the
+# format's own on purpose -- the specification places files inside one skill directory, while
+# an environment description places skill directories inside a project or a home directory
+# (see the comment at `layout`). A client description that declares this file as the format it
+# layers over (the schema's `extends`) has to be measurable against exactly these places.
+schema_version: 1
+vendor: agentskills
+environment: agent-skills
+version_range: ">=1.0,<2.0"
+checked_at: 2026-09-14
+stale_after_days: 30
+normalization: v1
+
+sources:
+  - id: skill-md-format
+    url: https://agentskills.io/specification
+    markdown_url: https://agentskills.io/specification.md
+    anchor: "`SKILL.md` format"
+    sha256: "b3342bd1f64c1d5ccae4eda1656943515ecc169d8e5de510c588c8e0ac45b8b0"
+    checked_at: 2026-09-14
+    environment_version: "1.0" # our label for the format; it publishes no number of its own
+  # `Frontmatter` is the whole `### Frontmatter` section: the field table and the six
+  # per-field subsections below it, which are deeper headings and stay inside the section.
+  - id: frontmatter
+    url: https://agentskills.io/specification
+    markdown_url: https://agentskills.io/specification.md
+    anchor: "Frontmatter"
+    sha256: "329a2a14dec9a5938a91e92ae6e6aa103db00a77c411ef0ba28dc01cd64cec00"
+    checked_at: 2026-09-14
+    environment_version: "1.0" # our label for the format; it publishes no number of its own
+  - id: body-content
+    url: https://agentskills.io/specification
+    markdown_url: https://agentskills.io/specification.md
+    anchor: "Body content"
+    sha256: "53f3d05ebc0fa915aa8a0ddf99a126035a78436afacce268a77c0bbf19f3722a"
+    checked_at: 2026-09-14
+    environment_version: "1.0" # our label for the format; it publishes no number of its own
+  - id: file-references
+    url: https://agentskills.io/specification
+    markdown_url: https://agentskills.io/specification.md
+    anchor: "File references"
+    sha256: "20aa0a944b40bb7d0fbd2a1f6b691322fef50dffa93fc14b83d828b6eb4e3743"
+    checked_at: 2026-09-14
+    environment_version: "1.0" # our label for the format; it publishes no number of its own
+  - id: directory-structure
+    url: https://agentskills.io/specification
+    markdown_url: https://agentskills.io/specification.md
+    anchor: "Directory structure"
+    sha256: "295b0553129712f419993a5690902427fe8f4a0bdef49a265b0789d16785566a"
+    checked_at: 2026-09-14
+    environment_version: "1.0" # our label for the format; it publishes no number of its own
+  - id: optional-directories
+    url: https://agentskills.io/specification
+    markdown_url: https://agentskills.io/specification.md
+    anchor: "Optional directories"
+    sha256: "7f3a3fe6c4fafb247457e913587630032428ad543e9516ff007c10b644df9bd7"
+    checked_at: 2026-09-14
+    environment_version: "1.0" # our label for the format; it publishes no number of its own
+
+capabilities:
+  # The six frontmatter fields the specification declares, in the order of its field table.
+  # Ids are the ones the Claude Code description already uses, so the two line up entry by entry.
+  - id: skill.frontmatter.name
+    kind: skill-field
+    support: supported
+    source_id: frontmatter
+    note: "required; 1-64 characters, lowercase alphanumeric and hyphens, no leading, trailing or consecutive hyphen; must match the parent directory name"
+  - id: skill.frontmatter.description
+    kind: skill-field
+    support: supported
+    source_id: frontmatter
+    note: "required; 1-1024 characters; what the skill does and when to use it, with keywords that help agents identify relevant tasks"
+  - id: skill.frontmatter.license
+    kind: skill-field
+    support: supported
+    source_id: frontmatter
+    note: "optional; the license applied to the skill, recommended short: a license name or the name of a bundled license file"
+  - id: skill.frontmatter.compatibility
+    kind: skill-field
+    support: supported
+    source_id: frontmatter
+    note: "optional; 1-500 characters, intended product, required system packages, network access needs; \"Most skills do not need the `compatibility` field\""
+  - id: skill.frontmatter.metadata
+    kind: skill-field
+    support: supported
+    source_id: frontmatter
+    note: "optional; a map from string keys to string values, for \"additional properties not defined by the Agent Skills spec\""
+  - id: skill.frontmatter.allowed-tools
+    kind: skill-field
+    support: supported
+    source_id: frontmatter
+    note: "optional; space-separated string of pre-approved tools; \"Experimental. Support for this field may vary between agent implementations\""
+
+  # Three rules the specification states about the skill file itself rather than about one
+  # frontmatter field. `Capability.kind` is closed to skill-field / subagent-field /
+  # hook-event / settings-file, so each takes the nearest kind and its id says what it is --
+  # the move ADR 0005 already makes for a documented ceiling `limits` cannot hold. Dropping a
+  # rule the specification states would be the worse end of that same trade.
+  #
+  # The price is that `kind` no longer counts anything in this file: nine entries read
+  # `skill-field` while the specification declares six frontmatter fields. Count them by id
+  # instead -- the six are exactly the entries whose id starts with `skill.frontmatter.` --
+  # and take that as the rule until the kind vocabulary opens.
+  - id: skill.file.format
+    kind: skill-field
+    support: supported
+    source_id: skill-md-format
+    note: "\"The `SKILL.md` file must contain YAML frontmatter followed by Markdown content\""
+  - id: skill.body.content
+    kind: skill-field
+    support: supported
+    source_id: body-content
+    note: "the Markdown body after the frontmatter holds the skill instructions; \"There are no format restrictions\"; recommended sections are step-by-step instructions, examples of inputs and outputs, common edge cases"
+  - id: skill.body.file-references
+    kind: skill-field
+    support: supported
+    source_id: file-references
+    note: "other files are referenced by relative paths from the skill root; \"Keep file references one level deep from `SKILL.md`. Avoid deeply nested reference chains\""
+
+# What a skill directory holds. The specification locates files inside one skill; the Claude
+# Code description locates skills inside a project or a home directory. The two describe
+# different things, so these ids are deliberately not the ones used there.
+layout:
+  - id: skill.file
+    path: "<skill-name>/SKILL.md"
+    source_id: directory-structure
+  - id: skill.dir.scripts
+    path: "<skill-name>/scripts/"
+    source_id: optional-directories
+  - id: skill.dir.references
+    path: "<skill-name>/references/"
+    source_id: optional-directories
+  - id: skill.dir.assets
+    path: "<skill-name>/assets/"
+    source_id: optional-directories
+
+# The three ceilings the specification states as character counts.
+limits:
+  - id: skill.frontmatter.name.length
+    value: 64
+    unit: characters
+    source_id: frontmatter
+  - id: skill.frontmatter.description.length
+    value: 1024
+    unit: characters
+    source_id: frontmatter
+  - id: skill.frontmatter.compatibility.length
+    value: 500
+    unit: characters
+    source_id: frontmatter
+
+# A specification names no tool of its own and reads no configuration outside the skill.
+tool_names: []
+invisible_sources: []
+
+discrepancies: []
