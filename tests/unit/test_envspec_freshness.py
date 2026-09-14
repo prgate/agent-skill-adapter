@@ -8,7 +8,8 @@ from __future__ import annotations
 import gzip
 from datetime import date
 from email.message import Message
-from http.client import IncompleteRead
+from http.client import HTTPMessage, IncompleteRead
+from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request
@@ -18,9 +19,12 @@ import pytest
 from agent_skill_adapter.envspec import freshness
 from agent_skill_adapter.envspec.freshness import (
     CheckFailed,
+    UndecodableBody,
     _fetch,
     check,
+    confirmed_sources,
     decode_body,
+    guard_url,
     main,
     record,
 )
@@ -191,7 +195,9 @@ def test_a_defect_of_ours_is_not_filed_as_a_vendor_discrepancy(tmp_path: Path) -
 
     with pytest.raises(CheckFailed) as failed:
         check(spec, fetch=broken, today=TODAY)
-    assert [type(error) for error in failed.value.failures] == [TypeError]
+    assert [(sid, type(e)) for sid, e in failed.value.failures] == [
+        ("skills-frontmatter", TypeError)
+    ]
     assert failed.value.found == [], "a defect of ours is never filed against the vendor"
 
     def undecodable(_url: str) -> str:
@@ -199,7 +205,7 @@ def test_a_defect_of_ours_is_not_filed_as_a_vendor_discrepancy(tmp_path: Path) -
 
     with pytest.raises(CheckFailed) as failed:
         check(spec, fetch=undecodable, today=TODAY)
-    assert [type(error) for error in failed.value.failures] == [UnicodeDecodeError]
+    assert [type(e) for _, e in failed.value.failures] == [UnicodeDecodeError]
 
 
 def test_appended_entries_take_the_indent_of_the_existing_block(tmp_path: Path) -> None:
@@ -241,7 +247,7 @@ def test_main_refuses_a_root_with_nothing_to_check(tmp_path: Path) -> None:
     assert exit_code.value.code != 0
 
 
-def test_the_same_answer_decodes_the_same_way_compressed_or_not() -> None:
+def test_the_same_answer_decodes_the_same_way_compressed_or_not(tmp_path: Path) -> None:
     """The vendor may gzip an answer we did not ask to compress — the header decides."""
     plain = PAGE.encode("utf-8")
 
@@ -250,8 +256,12 @@ def test_the_same_answer_decodes_the_same_way_compressed_or_not() -> None:
     assert decode_body(gzip.compress(plain), "gzip") == PAGE
     assert decode_body(gzip.compress(plain), "GZIP") == PAGE, "header values are case-insensitive"
 
-    with pytest.raises(OSError):
+    with pytest.raises(UndecodableBody):
         decode_body(plain, "br")
+
+    spec = load(write_spec(tmp_path, recorded_sha()))
+    with pytest.raises(CheckFailed):
+        check(spec, fetch=lambda _url: decode_body(plain, "br"), today=TODAY)
 
 
 def test_one_failing_source_does_not_discard_the_others(tmp_path: Path) -> None:
@@ -306,24 +316,121 @@ class _Response:
         return None
 
 
+class _Opener:
+    """Stands in for the urllib opener: hands back one prepared answer, records the request."""
+
+    def __init__(self, response: _Response) -> None:
+        self.response = response
+        self.sent: list[Request] = []
+
+    def open(self, request: Request, timeout: float = 0) -> _Response:
+        self.sent.append(request)
+        return self.response
+
+
+def public_dns(monkeypatch: pytest.MonkeyPatch, address: str = "93.184.216.34") -> None:
+    """Resolve every host to ``address`` — the suite never asks a real resolver."""
+    monkeypatch.setattr(freshness, "_addresses", lambda _host, _port: [address])
+
+
 def test_fetch_asks_for_an_encoding_and_honours_the_one_it_gets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The wiring under test is the header: what we ask for, and what we do with the answer."""
-    sent: list[Request] = []
-
-    def urlopen(request: Request, timeout: float = 0) -> _Response:
-        sent.append(request)
-        return _Response(gzip.compress(PAGE.encode("utf-8")), {"Content-Encoding": "gzip"})
-
-    monkeypatch.setattr(freshness, "urlopen", urlopen)
+    public_dns(monkeypatch)
+    opener = _Opener(_Response(gzip.compress(PAGE.encode("utf-8")), {"Content-Encoding": "gzip"}))
+    monkeypatch.setattr(freshness, "_opener", opener)
 
     assert _fetch("https://example.invalid/docs/skills.md") == PAGE
-    assert sent[0].get_header("Accept-encoding") == "gzip, identity"
+    assert opener.sent[0].get_header("Accept-encoding") == "gzip, identity"
 
-    def refusing(request: Request, timeout: float = 0) -> _Response:
-        return _Response(b"nope", {}, status=503)
-
-    monkeypatch.setattr(freshness, "urlopen", refusing)
+    monkeypatch.setattr(freshness, "_opener", _Opener(_Response(b"nope", {}, status=503)))
     with pytest.raises(OSError, match="503"):
         _fetch("https://example.invalid/docs/skills.md")
+
+
+def test_an_address_out_of_a_description_cannot_send_us_anywhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A description is data: it must not be able to point our process at a private host."""
+    public_dns(monkeypatch)
+    for refused in ("http://example.invalid/docs.md", "file:///etc/passwd"):
+        with pytest.raises(OSError, match="only https"):
+            guard_url(refused)
+
+    for address in ("127.0.0.1", "10.0.0.7", "169.254.169.254", "::1"):
+        monkeypatch.setattr(freshness, "_addresses", lambda _h, _p, a=address: [a])
+        with pytest.raises(OSError, match="not a public address"):
+            guard_url("https://internal.invalid/docs.md")
+
+    public_dns(monkeypatch)
+    guard_url("https://example.invalid/docs.md")
+
+
+def test_fetch_refuses_the_address_before_it_opens_anything(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guard is wired into the fetch, not merely available next to it."""
+    opener = _Opener(_Response(PAGE.encode("utf-8"), {}))
+    monkeypatch.setattr(freshness, "_opener", opener)
+
+    public_dns(monkeypatch)
+    with pytest.raises(OSError, match="only https"):
+        _fetch("http://example.invalid/docs.md")
+
+    monkeypatch.setattr(freshness, "_addresses", lambda _host, _port: ["127.0.0.1"])
+    with pytest.raises(OSError, match="not a public address"):
+        _fetch("https://internal.invalid/docs.md")
+
+    assert opener.sent == [], "a refused address is never opened"
+
+
+def test_a_redirect_is_guarded_at_every_hop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A trusted first address proves nothing: the hop it answers with is checked too."""
+    monkeypatch.setattr(freshness, "_addresses", lambda _host, _port: ["127.0.0.1"])
+    request = Request("https://example.invalid/docs.md")
+
+    with pytest.raises(OSError, match="not a public address"):
+        freshness._GuardedRedirects().redirect_request(
+            request,
+            BytesIO(b""),
+            302,
+            "Found",
+            HTTPMessage(),
+            "https://internal.invalid/docs.md",
+        )
+
+
+def test_the_same_finding_is_not_filed_twice(tmp_path: Path) -> None:
+    """Three runs against one broken page must not leave three identical records."""
+    path = write_spec(tmp_path, recorded_sha())
+
+    def unreachable(_url: str) -> str:
+        raise OSError("HTTP 503")
+
+    for day in (TODAY, date(2026, 9, 15), date(2026, 9, 16)):
+        record(path, check(load(path), fetch=unreachable, today=day))
+
+    assert len(load(path).discrepancies) == 1, "the date alone does not make it a new finding"
+
+
+def test_a_run_clears_only_the_sources_it_actually_read(tmp_path: Path) -> None:
+    """A source read and found unchanged is cleared; one the run never reached is kept."""
+    path = write_spec(tmp_path, recorded_sha(), second_source=True)
+
+    def nothing_answers(_url: str) -> str:
+        raise OSError("HTTP 503")
+
+    spec = load(path)
+    record(path, check(spec, fetch=nothing_answers, today=TODAY))
+    assert len(load(path).discrepancies) == 2
+
+    def only_the_second_answers(url: str) -> str:
+        if url.startswith(SECOND_URL):
+            raise OSError("HTTP 503")
+        return PAGE
+
+    found = check(spec, fetch=only_the_second_answers, today=TODAY)
+    record(path, found, confirmed=confirmed_sources(spec, found))
+
+    assert [d.source_id for d in load(path).discrepancies] == ["hooks-config"]

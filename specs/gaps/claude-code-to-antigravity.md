@@ -1,6 +1,6 @@
 # What google/antigravity does not reproduce from anthropic/claude-code
 
-This list is computed, not written: it is the output of comparing the two environment descriptions in `specs/`, entry by entry, matched by id. Only this paragraph is written by hand. `reproduced` means the target's own documentation says it supports the entry; `missing` means that documentation says, in words, that it does not; `unknown` means the documentation is silent or carries no such entry -- silence is never read as a denial. An empty list -- nothing missing and nothing unknown -- would mean the transfer is a file copy and this product is not needed. The last column splits `unknown` in two: an entry the target description does not carry at all is evidence about the target, while an entry it carries without a verdict is the limit of our reading of its documentation -- adding the two together would let our own incompleteness pass for a finding.
+This list is computed, not written: it is the output of comparing the two environment descriptions in `specs/`, entry by entry, matched by id. Only this paragraph is written by hand. `reproduced` means the target's own documentation says it supports the entry; `missing` means that documentation says, in words, that it does not; `unknown` means the documentation is silent or carries no such entry -- silence is never read as a denial. An empty list -- nothing missing and nothing unknown -- would mean the transfer is a file copy and this product is not needed. The last column splits `unknown` in two: an entry the target description does not carry at all is evidence about the target, while an entry it carries without a verdict is the limit of our reading of its documentation -- adding the two together would let our own incompleteness pass for a finding. `out-of-scope` is a field the source environment documents as accepted and inert: it has no behaviour to carry over, so it is neither a gap nor something the target can be credited with reproducing.
 
 - Source: `anthropic/claude-code` >=2.1.0,<2.2.0, checked 2026-09-14
 - Target: `google/antigravity` >=2.0.0,<3.0.0, checked 2026-09-14
@@ -9,7 +9,8 @@ This list is computed, not written: it is the output of comparing the two enviro
 | --- | --- | --- |
 | reproduced | 22 | 0 |
 | missing | 0 | 0 |
-| unknown | 73 | 8 |
+| unknown | 70 | 8 |
+| out-of-scope | 3 | 0 |
 
 ## Entries
 
@@ -74,15 +75,15 @@ This list is computed, not written: it is the output of comparing the two enviro
 | skill.frontmatter.argument-hint | skill-field | supported | unknown | unknown | autocomplete hint for expected arguments -> Not named by the frontmatter table; the page says nothing about it either way. |
 | skill.frontmatter.arguments | skill-field | supported | unknown | unknown | named positional arguments for $name substitution; space-separated string or YAML list -> Not named by the frontmatter table; the page says nothing about it either way. |
 | skill.frontmatter.background | skill-field | supported | unknown | unknown | only with context: fork; false waits for the forked subagent in the invoking turn -> Not named by the frontmatter table; the page says nothing about it either way. |
-| skill.frontmatter.compatibility | skill-field | unsupported | unknown | unknown | Agent Skills spec field, string up to 500 characters: "Claude Code accepts the field but doesn't act on it" -> Not named by the frontmatter table; the page says nothing about it either way. |
+| skill.frontmatter.compatibility | skill-field | unsupported | unknown | out-of-scope | Agent Skills spec field, string up to 500 characters: "Claude Code accepts the field but doesn't act on it" -> Not named by the frontmatter table; the page says nothing about it either way. |
 | skill.frontmatter.context | skill-field | supported | unknown | unknown | fork runs the skill in a forked subagent context -> Not named by the frontmatter table; the page says nothing about it either way. |
 | skill.frontmatter.description | skill-field | supported | supported | reproduced | what the skill does and when to use it; falls back to the first non-empty content line -> Required; this is what the agent sees when deciding whether to apply the skill. |
 | skill.frontmatter.disable-model-invocation | skill-field | supported | unknown | unknown | prevents automatic loading; since v2.1.196 also blocks scheduled-task invocation -> Not named by the frontmatter table; the page says nothing about it either way. |
 | skill.frontmatter.disallowed-tools | skill-field | supported | unknown | unknown | tools removed from the pool while the skill is active; cannot remove EndConversation -> Not named by the frontmatter table; the page says nothing about it either way. |
 | skill.frontmatter.effort | skill-field | supported | unknown | unknown | low \| medium \| high \| xhigh \| max; available levels depend on the model -> Not named by the frontmatter table; the page says nothing about it either way. |
 | skill.frontmatter.hooks | skill-field | supported | unknown | unknown | hooks registered on invocation and kept for the rest of the session -> Not named by the frontmatter table; the page says nothing about it either way. |
-| skill.frontmatter.license | skill-field | unsupported | unknown | unknown | Agent Skills spec field: "Claude Code accepts the field but doesn't act on it" -> Not named by the frontmatter table; the page says nothing about it either way. |
-| skill.frontmatter.metadata | skill-field | unsupported | unknown | unknown | free-form YAML map for your own tooling: "Claude Code doesn't act on its contents, and drops a value that isn't a map" -> Not named by the frontmatter table; the page says nothing about it either way. |
+| skill.frontmatter.license | skill-field | unsupported | unknown | out-of-scope | Agent Skills spec field: "Claude Code accepts the field but doesn't act on it" -> Not named by the frontmatter table; the page says nothing about it either way. |
+| skill.frontmatter.metadata | skill-field | unsupported | unknown | out-of-scope | free-form YAML map for your own tooling: "Claude Code doesn't act on its contents, and drops a value that isn't a map" -> Not named by the frontmatter table; the page says nothing about it either way. |
 | skill.frontmatter.model | skill-field | supported | unknown | unknown | model override for the rest of the turn; accepts /model values or inherit -> Not named by the frontmatter table; the page says nothing about it either way. |
 | skill.frontmatter.name | skill-field | supported | supported | reproduced | display name in skill listings; defaults to the directory name -> Optional; defaults to the folder name when omitted. |
 | skill.frontmatter.paths | skill-field | supported | unknown | unknown | glob patterns that gate automatic activation -> Not named by the frontmatter table; the page says nothing about it either way. |

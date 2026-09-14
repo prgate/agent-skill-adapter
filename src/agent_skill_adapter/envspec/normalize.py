@@ -25,7 +25,8 @@ def section_text(markdown: str, anchor: str) -> str:
 
     The section runs from its heading to the next heading of the same or a higher
     level; deeper headings stay inside it. Hashes inside fenced code blocks are
-    not headings, and a fenced block ends only on the marker that opened it. The
+    not headings, and a fenced block ends only on a marker of the same character,
+    at least as long as the one that opened it. The
     anchor is the heading text without the hashes, compared after trimming,
     collapsing inner spacing and folding case.
     """
@@ -33,14 +34,14 @@ def section_text(markdown: str, anchor: str) -> str:
     lines = markdown.splitlines()
     headings: list[tuple[int, int]] = []
     matches: list[int] = []
-    fence: str | None = None
+    fence: tuple[str, int] | None = None
     for number, line in enumerate(lines):
         found_fence = _FENCE.match(line)
         if found_fence is not None:
-            marker = found_fence.group(1)[0]
+            marker = found_fence.group(1)
             if fence is None:
-                fence = marker
-            elif marker == fence:
+                fence = (marker[0], len(marker))
+            elif marker[0] == fence[0] and len(marker) >= fence[1]:
                 fence = None
             continue
         if fence is not None:

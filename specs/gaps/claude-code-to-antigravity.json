@@ -14,12 +14,14 @@
   "counts": {
     "reproduced": 22,
     "missing": 0,
-    "unknown": 73
+    "unknown": 70,
+    "out-of-scope": 3
   },
   "absent_from_target": {
     "reproduced": 0,
     "missing": 0,
-    "unknown": 8
+    "unknown": 8,
+    "out-of-scope": 0
   },
   "gaps": [
     {
@@ -617,7 +619,7 @@
       "kind": "skill-field",
       "source_support": "unsupported",
       "target_support": "unknown",
-      "outcome": "unknown",
+      "outcome": "out-of-scope",
       "matched": true,
       "source_note": "Agent Skills spec field, string up to 500 characters: \"Claude Code accepts the field but doesn't act on it\"",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -687,7 +689,7 @@
       "kind": "skill-field",
       "source_support": "unsupported",
       "target_support": "unknown",
-      "outcome": "unknown",
+      "outcome": "out-of-scope",
       "matched": true,
       "source_note": "Agent Skills spec field: \"Claude Code accepts the field but doesn't act on it\"",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -697,7 +699,7 @@
       "kind": "skill-field",
       "source_support": "unsupported",
       "target_support": "unknown",
-      "outcome": "unknown",
+      "outcome": "out-of-scope",
       "matched": true,
       "source_note": "free-form YAML map for your own tooling: \"Claude Code doesn't act on its contents, and drops a value that isn't a map\"",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."

@@ -137,6 +137,21 @@ def test_is_stale_by_date_alone_without_any_freshness_run(tmp_path: Path) -> Non
     assert is_stale(spec, TODAY + timedelta(days=1)) is True
 
 
+def test_is_stale_when_the_check_date_lies_in_the_future(tmp_path: Path) -> None:
+    path = write_spec(
+        tmp_path,
+        "claude-code-2.1",
+        ">=2.1.0,<2.2.0",
+        checked_at=TODAY + timedelta(days=1),
+    )
+    spec = load(path)
+
+    assert is_stale(spec, TODAY) is True, "a check dated ahead of today cannot be trusted"
+    assert is_stale(spec, TODAY + timedelta(days=1)) is False, "on that day it is simply fresh"
+    with pytest.raises(StaleSpec):
+        select(tmp_path, "anthropic", "claude-code", "2.1.270", today=TODAY)
+
+
 def test_is_stale_with_a_recorded_discrepancy_even_when_checked_today(tmp_path: Path) -> None:
     path = write_spec(
         tmp_path,

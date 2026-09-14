@@ -193,3 +193,14 @@ def test_load_rejects_a_malformed_version_range(tmp_path: Path, broken: str) -> 
     data["version_range"] = broken
     with pytest.raises(InvalidSpec):
         load(write_spec(tmp_path, data))
+
+
+def test_section_text_needs_a_closing_fence_as_long_as_the_opening_one() -> None:
+    doc = (
+        "## Limits\n\n````\n```\n# not a heading\n````\n\n"
+        "after the block\n\n## Next\n\nother text\n"
+    )
+    section = section_text(doc, "Limits")
+    assert "not a heading" in section, "a shorter marker does not close a longer fence"
+    assert "after the block" in section
+    assert "other text" not in section

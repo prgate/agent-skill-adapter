@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from agent_skill_adapter.envspec.loader import AmbiguousSpec, SpecNotFound, capability, load_all
+from agent_skill_adapter.envspec.loader import capability, select
 from agent_skill_adapter.envspec.model import EnvSpec, Support
 
 
@@ -26,6 +26,8 @@ class Outcome(str, Enum):
     REPRODUCED = "reproduced"
     MISSING = "missing"
     UNKNOWN = "unknown"
+    OUT_OF_SCOPE = "out-of-scope"
+    """The source environment does not hold the entry either, so there is nothing to reproduce."""
 
 
 NO_ENTRY = "(no matching entry in the target description)"
@@ -91,7 +93,12 @@ def compare(source: EnvSpec, target: EnvSpec) -> GapReport:
     makes the report re-computable; the ids of the two descriptions are written to agree
     wherever both environments name the same thing.
 
-    The outcome is whatever the target *says*, never what it omits:
+    An entry the *source* environment does not itself hold -- a field its own documentation
+    records as accepted and inert -- is ``out-of-scope`` whatever the target says. There is
+    no guarantee to carry over, so it can neither count as a gap nor, if the target one day
+    documents it, as something reproduced.
+
+    For the rest, the outcome is whatever the target *says*, never what it omits:
 
     * the target documents the entry as supported -- ``reproduced``;
     * the target documents it as unsupported, in words -- ``missing``;
@@ -116,7 +123,11 @@ def compare(source: EnvSpec, target: EnvSpec) -> GapReport:
                 kind=entry.kind,
                 source_support=entry.support,
                 target_support=support,
-                outcome=_FROM_SUPPORT[support],
+                outcome=(
+                    _FROM_SUPPORT[support]
+                    if entry.support is Support.SUPPORTED
+                    else Outcome.OUT_OF_SCOPE
+                ),
                 matched=entry.id in target_notes,
                 source_note=entry.note,
                 target_note=target_notes.get(entry.id) if entry.id in target_notes else NO_ENTRY,
@@ -155,7 +166,10 @@ _INTRO = (
     "copy and this product is not needed. The last column splits `unknown` in two: an entry the "
     "target description does not carry at all is evidence about the target, while an entry it "
     "carries without a verdict is the limit of our reading of its documentation -- adding the "
-    "two together would let our own incompleteness pass for a finding."
+    "two together would let our own incompleteness pass for a finding. `out-of-scope` is a "
+    "field the source environment documents as accepted and inert: it has no behaviour to "
+    "carry over, so it is neither a gap nor something the target can be credited with "
+    "reproducing."
 )
 
 
@@ -253,24 +267,31 @@ def render_markdown(report: GapReport) -> str:
 SOURCE = ("anthropic", "claude-code")
 TARGET = ("google", "antigravity")
 
-
-def _pick(specs: list[EnvSpec], vendor: str, environment: str) -> EnvSpec:
-    """The single description of ``vendor``/``environment``. Two of them is an error, not a pick."""
-    found = [spec for spec in specs if (spec.vendor, spec.environment) == (vendor, environment)]
-    if not found:
-        raise SpecNotFound(f"no description of {vendor}/{environment} under the given root")
-    if len(found) > 1:
-        raise AmbiguousSpec(
-            f"{len(found)} descriptions of {vendor}/{environment}: "
-            "the report cannot pick one, and guessing would make it unreproducible"
-        )
-    return found[0]
+# The environment versions the committed report is built for. They are declared here, not
+# inferred: descriptions of several versions of one environment are meant to sit side by
+# side (FR-5), and "take the newest one" is a selection rule the product has not declared.
+# Moving to a new environment version is an edit of this line, visible in review.
+SOURCE_VERSION = "2.1.270"
+TARGET_VERSION = "2.0"
 
 
-def report_from(root: str | Path) -> GapReport:
-    """The report for the one pair of descriptions under ``root``."""
-    specs = load_all(root)
-    return compare(_pick(specs, *SOURCE), _pick(specs, *TARGET))
+def report_from(
+    root: str | Path,
+    *,
+    source_version: str = SOURCE_VERSION,
+    target_version: str = TARGET_VERSION,
+    allow_stale: bool = False,
+) -> GapReport:
+    """The report for the descriptions under ``root`` that cover the two given versions.
+
+    Selection is :func:`loader.select`, so its refusals stand: no description covering the
+    version raises ``SpecNotFound``, more than one raises ``AmbiguousSpec`` rather than
+    picking, and a stale winner raises ``StaleSpec`` unless ``allow_stale`` is set.
+    """
+    return compare(
+        select(root, *SOURCE, source_version, allow_stale=allow_stale),
+        select(root, *TARGET, target_version, allow_stale=allow_stale),
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -285,9 +306,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = ArgumentParser(prog="python -m agent_skill_adapter.envspec.gaps")
     parser.add_argument("--root", default="specs", help="tree of environment descriptions")
     parser.add_argument("--out", default="specs/gaps", help="where both renderings are written")
+    parser.add_argument("--source-version", default=SOURCE_VERSION, help="source environment")
+    parser.add_argument("--target-version", default=TARGET_VERSION, help="target environment")
+    parser.add_argument(
+        "--allow-stale", action="store_true", help="rebuild from a description due for a re-check"
+    )
     args = parser.parse_args(argv)
 
-    report = report_from(args.root)
+    report = report_from(
+        args.root,
+        source_version=args.source_version,
+        target_version=args.target_version,
+        allow_stale=args.allow_stale,
+    )
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)

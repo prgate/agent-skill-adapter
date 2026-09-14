@@ -110,10 +110,13 @@ def is_stale(spec: EnvSpec, today: date) -> bool:
     """A description is stale once a discrepancy is recorded, or once its check is too old.
 
     The second half needs no network and no freshness run: it reads ``checked_at`` only.
+    A check dated after today is stale as well: it is either a typo in the file or a clock
+    that drifted, and under both the entries are unverifiable, so we refuse rather than pass.
     """
     if spec.discrepancies:
         return True
-    return (today - spec.checked_at).days > spec.stale_after_days
+    age = (today - spec.checked_at).days
+    return age < 0 or age > spec.stale_after_days
 
 
 def capability(spec: EnvSpec, capability_id: str) -> Support:
