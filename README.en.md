@@ -71,6 +71,10 @@ loses — and moves no files at all. The PRD requires that answer **before** any
 core: had nothing turned out to be untransferable, the product would reduce to copying
 files and would not be worth building.
 
+The whole design — solid lines work today, dashed ones do not yet:
+
+![The adapter end to end, from a skill repository to a build for the target environment](docs/assets/end-to-end.svg)
+
 What works:
 
 - descriptions of two environments, every record anchored to a documentation section by
@@ -147,8 +151,8 @@ repository; a single skill outside one is not in scope yet.
 - [PRD-001](docs/prd/PRD-001-agent-skill-adapter.md) — the problem, the scope, and the 33
   requirements, including nine decisions consciously left open.
 - [`docs/adr/`](docs/adr/) — why the design is the way it is, and what was rejected.
-- [`docs/assets/how-it-works.html`](docs/assets/how-it-works.html) — the diagram above as an
-  explorable page.
+- [`docs/assets/how-it-works.html`](docs/assets/how-it-works.html) and
+  [`end-to-end.html`](docs/assets/end-to-end.html) — both diagrams as explorable pages.
 - [Documentation hub](docs/README.md).
 
 ## Development
