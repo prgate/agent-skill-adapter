@@ -11,16 +11,30 @@
     "version_range": ">=2.0.0,<3.0.0",
     "checked_at": "2026-09-14"
   },
+  "specification": [
+    {
+      "vendor": "agentskills",
+      "environment": "agent-skills",
+      "version_range": ">=1.0,<2.0",
+      "checked_at": "2026-09-14"
+    }
+  ],
   "counts": {
-    "reproduced": 22,
+    "reproduced": 26,
     "missing": 0,
-    "unknown": 70,
+    "unknown": 73,
+    "out-of-scope": 3
+  },
+  "declared_by_specification": {
+    "reproduced": 6,
+    "missing": 0,
+    "unknown": 4,
     "out-of-scope": 3
   },
   "absent_from_target": {
     "reproduced": 0,
     "missing": 0,
-    "unknown": 8,
+    "unknown": 11,
     "out-of-scope": 0
   },
   "gaps": [
@@ -30,6 +44,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": false,
       "source_note": ".claude/agent-memory/<name>/",
       "target_note": "(no matching entry in the target description)"
@@ -40,6 +55,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": false,
       "source_note": "~/.claude/agent-memory/<name>/",
       "target_note": "(no matching entry in the target description)"
@@ -50,6 +66,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": ".claude/agents/*.md",
       "target_note": ".agents/agents/"
@@ -60,6 +77,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "~/.claude/agents/*.md",
       "target_note": "~/.gemini/config/agents/"
@@ -70,6 +88,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": false,
       "source_note": ".claude/commands/*.md",
       "target_note": "(no matching entry in the target description)"
@@ -80,6 +99,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": false,
       "source_note": "~/.claude/commands/*.md",
       "target_note": "(no matching entry in the target description)"
@@ -90,6 +110,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a configuration file changes during a session",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -100,6 +121,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when the working directory changes",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -110,6 +132,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a working directory is added mid-session via /add-dir",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -120,6 +143,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when an MCP server requests user input during a tool call",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -130,6 +154,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "after a user responds to an MCP elicitation, before the reply reaches the server",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -140,6 +165,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a watched file changes on disk; matcher selects the filenames",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -150,6 +176,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a CLAUDE.md or .claude/rules/*.md file is loaded into context",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -160,6 +187,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "while assistant message text is displayed",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -170,6 +198,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when Claude Code sends a notification",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -180,6 +209,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when auto mode denies a tool call",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -190,6 +220,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a tool call needs a permission decision",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -200,6 +231,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "after context compaction completes",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -210,6 +242,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "after the session model changes",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -220,6 +253,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "after a batch of parallel tool calls resolves, before the next model call",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -230,6 +264,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "after a tool call succeeds",
       "target_note": "Fires after a tool completes; the matcher targets the tool name."
@@ -240,6 +275,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "after a tool call fails",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -250,6 +286,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "before context compaction",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -260,6 +297,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "before a requested model switch is applied; can block the switch",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -270,6 +308,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "before a tool call executes; can block it",
       "target_note": "Fires before a tool is executed; the matcher targets the tool name."
@@ -280,6 +319,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a session terminates",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -290,6 +330,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a session begins or resumes",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -300,6 +341,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "on --init-only, or --init / --maintenance in -p mode",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -310,6 +352,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "when Claude finishes responding",
       "target_note": "Fires when the execution loop terminates; the matcher is ignored."
@@ -320,6 +363,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when the turn ends due to an API error",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -330,6 +374,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a subagent is spawned",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -340,6 +385,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a subagent finishes",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -350,6 +396,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a task is being marked as completed",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -360,6 +407,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a task is being created via TaskCreate",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -370,6 +418,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when an agent team teammate is about to go idle",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -380,6 +429,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a user-typed command expands into a prompt; can block the expansion",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -390,6 +440,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when you submit a prompt, before Claude processes it",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -400,6 +451,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a worktree is being created; replaces default git behavior",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -410,6 +462,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "when a worktree is being removed at session exit or subagent finish",
       "target_note": "Absent from the supported-events table; the page does not say it is unavailable."
@@ -420,6 +473,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": false,
       "source_note": "managed-settings.json",
       "target_note": "(no matching entry in the target description)"
@@ -430,6 +484,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "hooks/hooks.json",
       "target_note": "plugins/<plugin-name>/hooks.json"
@@ -440,6 +495,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": ".claude/settings.json",
       "target_note": ".agents/hooks.json"
@@ -450,6 +506,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": false,
       "source_note": ".claude/settings.local.json",
       "target_note": "(no matching entry in the target description)"
@@ -460,6 +517,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "~/.claude/settings.json",
       "target_note": "~/.gemini/config/hooks.json"
@@ -470,6 +528,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "~/.claude.json — app state Claude Code writes for itself; sign-in, MCP servers, per-project state",
       "target_note": "The counterpart topic is an app-state file the tool writes for itself (sign-in, MCP servers, per-project state). The settings page names no such file either way."
@@ -480,6 +539,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "managed-settings.json and other managed sources; nothing you set overrides it",
       "target_note": "No administrator-managed policy file is named on this page; nor is one ruled out."
@@ -490,6 +550,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "a plugin's hooks/hooks.json — hooks bundled with the plugin, active while it is enabled",
       "target_note": "A plugin's own `hooks.json` at the plugin root, loaded while the plugin is active."
@@ -500,6 +561,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": ".claude/settings.json — everyone working in the folder that contains it",
       "target_note": "Project settings are documented as a settings panel, not as a file. No checked-in, project-scoped settings file is named, and the page does not say one is unavailable."
@@ -510,6 +572,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": ".claude/settings.local.json — you, in this one project only; kept out of git",
       "target_note": "No per-checkout, git-ignored settings override is named; nor is one ruled out."
@@ -520,6 +583,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "~/.claude/settings.json — you, in every project on this machine",
       "target_note": "`~/.gemini/antigravity-cli/settings.json` — you, on this machine, in every workspace. Written sparsely: only values that differ from the defaults reach disk."
@@ -530,6 +594,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": false,
       "source_note": ".claude/settings.json",
       "target_note": "(no matching entry in the target description)"
@@ -540,6 +605,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": false,
       "source_note": ".claude/settings.local.json",
       "target_note": "(no matching entry in the target description)"
@@ -550,6 +616,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "share of the context window reserved for the skill listing; default 0.01, that is 1% of the context window",
       "target_note": "No setting that caps the share of the context window spent on the skill listing is named among the four settings categories, and none is ruled out."
@@ -560,9 +627,87 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "~/.claude/settings.json",
       "target_note": "~/.gemini/antigravity-cli/settings.json"
+    },
+    {
+      "id": "skill.body.content",
+      "kind": "skill-field",
+      "source_support": "supported",
+      "target_support": "supported",
+      "outcome": "reproduced",
+      "origin": "specification",
+      "matched": true,
+      "source_note": "the Markdown body after the frontmatter holds the skill instructions; \"There are no format restrictions\"; recommended sections are step-by-step instructions, examples of inputs and outputs, common edge cases",
+      "target_note": "The Markdown body after the frontmatter holds the instructions the agent follows."
+    },
+    {
+      "id": "skill.body.file-references",
+      "kind": "skill-field",
+      "source_support": "supported",
+      "target_support": "unknown",
+      "outcome": "unknown",
+      "origin": "specification",
+      "matched": false,
+      "source_note": "other files are referenced by relative paths from the skill root; \"Keep file references one level deep from `SKILL.md`. Avoid deeply nested reference chains\"",
+      "target_note": "(no matching entry in the target description)"
+    },
+    {
+      "id": "skill.dir.assets",
+      "kind": "layout",
+      "source_support": "supported",
+      "target_support": "unknown",
+      "outcome": "unknown",
+      "origin": "specification",
+      "matched": false,
+      "source_note": "<skill-name>/assets/",
+      "target_note": "(no matching entry in the target description)"
+    },
+    {
+      "id": "skill.dir.references",
+      "kind": "layout",
+      "source_support": "supported",
+      "target_support": "unknown",
+      "outcome": "unknown",
+      "origin": "specification",
+      "matched": false,
+      "source_note": "<skill-name>/references/",
+      "target_note": "(no matching entry in the target description)"
+    },
+    {
+      "id": "skill.dir.scripts",
+      "kind": "layout",
+      "source_support": "supported",
+      "target_support": "supported",
+      "outcome": "reproduced",
+      "origin": "specification",
+      "matched": true,
+      "source_note": "<skill-name>/scripts/",
+      "target_note": "<skill-name>/scripts/"
+    },
+    {
+      "id": "skill.file",
+      "kind": "layout",
+      "source_support": "supported",
+      "target_support": "supported",
+      "outcome": "reproduced",
+      "origin": "specification",
+      "matched": true,
+      "source_note": "<skill-name>/SKILL.md",
+      "target_note": "<skill-name>/SKILL.md"
+    },
+    {
+      "id": "skill.file.format",
+      "kind": "skill-field",
+      "source_support": "supported",
+      "target_support": "supported",
+      "outcome": "reproduced",
+      "origin": "specification",
+      "matched": true,
+      "source_note": "\"The `SKILL.md` file must contain YAML frontmatter followed by Markdown content\"",
+      "target_note": "\"Every skill needs a `SKILL.md` file with YAML frontmatter at the top\", followed by Markdown."
     },
     {
       "id": "skill.frontmatter.agent",
@@ -570,6 +715,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "subagent type used when context: fork is set",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -580,6 +726,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "specification",
       "matched": true,
       "source_note": "tools pre-approved for the invoking turn; the grant clears on the next user message",
       "target_note": "The frontmatter table lists only `name` and `description`. It does not state that a tool-restriction field is rejected or ignored, so this is silence, not a denial."
@@ -590,6 +737,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "autocomplete hint for expected arguments",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -600,6 +748,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "named positional arguments for $name substitution; space-separated string or YAML list",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -610,6 +759,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "only with context: fork; false waits for the forked subagent in the invoking turn",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -620,6 +770,7 @@
       "source_support": "unsupported",
       "target_support": "unknown",
       "outcome": "out-of-scope",
+      "origin": "specification",
       "matched": true,
       "source_note": "Agent Skills spec field, string up to 500 characters: \"Claude Code accepts the field but doesn't act on it\"",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -630,6 +781,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "fork runs the skill in a forked subagent context",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -640,6 +792,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "specification",
       "matched": true,
       "source_note": "what the skill does and when to use it; falls back to the first non-empty content line",
       "target_note": "Required; this is what the agent sees when deciding whether to apply the skill."
@@ -650,6 +803,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "prevents automatic loading; since v2.1.196 also blocks scheduled-task invocation",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -660,6 +814,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "tools removed from the pool while the skill is active; cannot remove EndConversation",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -670,6 +825,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "low | medium | high | xhigh | max; available levels depend on the model",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -680,6 +836,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "hooks registered on invocation and kept for the rest of the session",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -690,6 +847,7 @@
       "source_support": "unsupported",
       "target_support": "unknown",
       "outcome": "out-of-scope",
+      "origin": "specification",
       "matched": true,
       "source_note": "Agent Skills spec field: \"Claude Code accepts the field but doesn't act on it\"",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -700,6 +858,7 @@
       "source_support": "unsupported",
       "target_support": "unknown",
       "outcome": "out-of-scope",
+      "origin": "specification",
       "matched": true,
       "source_note": "free-form YAML map for your own tooling: \"Claude Code doesn't act on its contents, and drops a value that isn't a map\"",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -710,6 +869,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "model override for the rest of the turn; accepts /model values or inherit",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -720,6 +880,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "specification",
       "matched": true,
       "source_note": "display name in skill listings; defaults to the directory name",
       "target_note": "Optional; defaults to the folder name when omitted."
@@ -730,6 +891,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "glob patterns that gate automatic activation",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -740,6 +902,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "bash (default) or powershell for inline !`command` blocks",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -750,6 +913,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "false hides the skill from the / menu; default true",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -760,6 +924,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "extra trigger context appended to description in the skill listing",
       "target_note": "Not named by the frontmatter table; the page says nothing about it either way."
@@ -770,6 +935,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": ".claude/skills/<name>/SKILL.md",
       "target_note": "<workspace-root>/.agents/skills/"
@@ -780,6 +946,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "~/.claude/skills/<name>/SKILL.md",
       "target_note": "~/.gemini/config/skills/"
@@ -790,6 +957,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "true keeps the subagent in the background even when Claude asks for the foreground",
       "target_note": "Not named by the frontmatter property table, and not stated to be rejected."
@@ -800,6 +968,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "red | blue | green | yellow | purple | orange | pink | cyan",
       "target_note": "Not named by the frontmatter table, and not stated to be rejected."
@@ -810,6 +979,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "required; when Claude should delegate to this subagent",
       "target_note": "Required string; used by the planner to decide when to delegate."
@@ -820,6 +990,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "tools denied; an entry with a specifier still removes the whole tool",
       "target_note": "Not named by the frontmatter property table, and not stated to be rejected."
@@ -830,6 +1001,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "low | medium | high | xhigh | max; available levels depend on the model",
       "target_note": "Not named by the frontmatter property table, and not stated to be rejected."
@@ -840,6 +1012,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "map of experimental options; cacheTtl accepts 5m or 1h",
       "target_note": "Not named by the frontmatter property table, and not stated to be rejected."
@@ -850,6 +1023,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "lifecycle hooks scoped to this subagent; ignored for plugin subagents",
       "target_note": "Not named by the frontmatter property table, and not stated to be rejected."
@@ -860,6 +1034,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "auto-submitted first user turn when the agent runs as the main session agent",
       "target_note": "Not named by the frontmatter property table, and not stated to be rejected."
@@ -870,6 +1045,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "worktree runs the subagent in a temporary git worktree",
       "target_note": "Not a frontmatter property. Workspace isolation (`inherit`, `branch`, `share`) is chosen per invocation by the caller, not declared in the agent file."
@@ -880,6 +1056,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "agentic turn cap; marking the output as partial requires v2.1.246 or later",
       "target_note": "Not named by the frontmatter property table, and not stated to be rejected."
@@ -890,6 +1067,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "server names or inline definitions; ignored for plugin subagents",
       "target_note": "Object list of MCP servers configured for this subagent."
@@ -900,6 +1078,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "persistent memory scope: user | project | local",
       "target_note": "Not named by the frontmatter property table, and not stated to be rejected."
@@ -910,6 +1089,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "sonnet | opus | haiku | fable | full model id | inherit",
       "target_note": "Model tier: `inherit`, `flash` or `pro`. Not a model identifier."
@@ -920,6 +1100,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "required; lowercase letters and hyphens, no ':'; hooks receive it as agent_type",
       "target_note": "Required string; the unique identifier of the custom agent."
@@ -930,6 +1111,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "default | acceptEdits | auto | dontAsk | bypassPermissions | plan | manual; the manual alias needs v2.1.200+; ignored for plugin subagents",
       "target_note": "Not named by the frontmatter property table. `commandExecutionPolicy` governs shell auto-execution only; whether a broader permission mode exists is not stated."
@@ -940,6 +1122,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "skills preloaded into the subagent context at startup, full content injected",
       "target_note": "String list of skill paths or plugin dependencies (`skills` / `plugins`)."
@@ -950,6 +1133,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "tools the subagent may use; inherits all subagent tools when omitted",
       "target_note": "String list of permitted tools, spelled in Antigravity tool names."
@@ -960,6 +1144,7 @@
       "source_support": "supported",
       "target_support": "unknown",
       "outcome": "unknown",
+      "origin": "extension",
       "matched": true,
       "source_note": "20 running subagents per session by default; spawning another with the Agent tool then fails with Concurrent subagent limit reached",
       "target_note": "The one ceiling this section states as strictly enforced is the nesting depth. It names no cap on the number of concurrently running subagents, and rules none out."
@@ -970,6 +1155,7 @@
       "source_support": "supported",
       "target_support": "supported",
       "outcome": "reproduced",
+      "origin": "extension",
       "matched": true,
       "source_note": "3 layers of subagents below the main conversation by default; CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH changes it, 1 turns nesting off",
       "target_note": "A maximum nesting depth of 10 levels of subagents beneath the primary agent is strictly enforced, to prevent runaway recursion or resource exhaustion."

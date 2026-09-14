@@ -17,6 +17,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 _COMPARISON = r"(>=|<=|==|!=|>|<)\d+(\.\d+)*"
 _VERSION_RANGE = re.compile(rf"\s*{_COMPARISON}\s*(,\s*{_COMPARISON}\s*)*")
 
+REFERENCE = r"^[^/@\s]+/[^/@\s]+@\d+(\.\d+)*$"
+"""How one description names another: ``<vendor>/<environment>@<version>``.
+
+The version is dotted numbers, the same form :func:`loader.select` is asked for, so a
+reference that the schema accepts is a reference the loader can go and resolve.
+"""
+
 
 class Support(str, Enum):
     """What the environment documentation says about a capability."""
@@ -120,6 +127,14 @@ class EnvSpec(_Strict):
     vendor: str = Field(min_length=1)
     environment: str = Field(min_length=1)
     version_range: str = Field(min_length=1)
+    extends: str | None = Field(default=None, pattern=REFERENCE)
+    """The description this one is a layer over, such as ``agentskills/agent-skills@1.0``.
+
+    Absent is the normal case: a description that extends nothing stands on its own.
+    Present, it says that every entry of the named description is part of this
+    environment too, so an entry can be told apart from this environment's own additions.
+    """
+
     checked_at: date
     stale_after_days: int = Field(default=30, ge=0)
     normalization: Literal["v1"]

@@ -58,24 +58,24 @@
 Reads vendor documentation of two agent environments into machine-checkable YAML descriptions, then computes entry by entry what Google Antigravity does not reproduce from Claude Code. Offline and deterministic: same descriptions in, same report bytes out.
 
 ### Commands
-- `make install` — `uv sync`.
+- `make install` — `uv sync`; `make pre-commit-run` — CI runs this before `make check`.
 - `make check` — the gate: ruff, `ruff format --check`, mypy strict over `src tests`, pytest.
 - `make test` / `make lint` / `make format` — subsets; one file is `uv run pytest tests/unit/test_envspec_gaps.py`.
-- `make pre-commit-run` — CI runs this before `make check`.
 - `uv run python -m agent_skill_adapter.envspec.gaps [--root specs] [--out specs/gaps]` — rebuild the gap report.
+- `make schema` — regenerate `specs/schema/envspec.schema.json` from the model (`envspec/schema.py`).
 - `uv run python -m agent_skill_adapter.envspec.freshness [--root specs] [--write]` — re-fetch vendor docs; the only command that uses the network.
 - `uv run agent-skill-adapter --version` — the installed CLI does nothing else yet.
 
 ### Structure
 - `src/agent_skill_adapter/envspec/` — all working code; `cli/main.py` is a typer app with no subcommands.
-- `specs/<vendor>/<environment>-<version>.yaml` — hand-written descriptions; `specs/gaps/` — generated, never hand-edited.
+- `specs/<vendor>/<environment>-<version>.yaml` — hand-written descriptions; `specs/gaps/` and `specs/schema/` — generated, never hand-edited.
 - `contracts/`, `examples/`, `docs/adr/`, `tests/{e2e,transforms,fixtures}/` — `.gitkeep` placeholders; only `tests/unit/` holds tests.
 
 ### Key files
 - `envspec/model.py` — the pydantic schema: `EnvSpec`, `Source`, `Capability`, `LayoutEntry`, `Limit`, `ToolName`, `InvisibleSource`, `Discrepancy`, `Support`, `DiscrepancyKind`.
 - `envspec/normalize.py` — `section_text(markdown, anchor)`, `normalize(text)`, `digest(text)`, `AnchorError`.
-- `envspec/loader.py` — `load(path)`, `load_all(root)`, `select(root, vendor, environment, version, *, allow_stale=False, today=None)`, `is_stale(spec, today)`, `capability(spec, capability_id) -> Support`; raises `InvalidSpec`, `InvalidVersion`, `SpecNotFound`, `AmbiguousSpec`, `StaleSpec`.
-- `envspec/gaps.py` — `compare(source, target) -> GapReport`, `render_markdown`, `render_json`, `report_from(root)`, `main`; `Outcome` is `reproduced|missing|unknown`.
+- `envspec/loader.py` — `load(path)`, `load_all(root)`, `select(root, vendor, environment, version, *, allow_stale=False, today=None)`, `is_stale(spec, today)`, `capability(spec, capability_id) -> Support`, `base_specs(spec, root, *, allow_stale=False, today=None) -> tuple[EnvSpec, ...]` (the chain the optional model field `extends: <vendor>/<environment>@<version>` names, nearest first, `()` when it names nothing), `is_inherited(bases, entry_id, *, among="capabilities"|"layout") -> bool` (membership by id inside that one list, never by the base's `support`); raises `InvalidSpec`, `InvalidVersion`, `SpecNotFound`, `AmbiguousSpec`, `StaleSpec`, `ExtendsCycle`.
+- `envspec/gaps.py` — `compare(source, target, bases=()) -> GapReport`, `render_markdown`, `render_json`, `report_from(root)`, `main`; `Outcome` is `reproduced|missing|unknown|out-of-scope`, `Origin` is `specification|extension` (which of the source's entries the extended open specification declares).
 - `envspec/freshness.py` — `check(spec, *, fetch, today=None) -> list[Discrepancy]`, `record(path, discrepancies)`, `markdown_url(source)`, `main(argv=None, *, fetch=_fetch)`.
 
 ### Architecture
@@ -102,6 +102,7 @@ Reads vendor documentation of two agent environments into machine-checkable YAML
 
 ### Pitfalls
 - `AGENTS.md` must stay at 120 lines or fewer and `CLAUDE.md`/`GEMINI.md` must remain symlinks to it, or `tests/unit/test_governance.py` fails.
+- Editing `model.py` leaves `specs/schema/envspec.schema.json` behind; `test_committed_schema_matches_the_model` catches it and the fix is `make schema`.
 - Editing a description leaves `specs/gaps/*` behind; `test_committed_report_matches_the_descriptions_it_was_built_from` catches it and the fix is to re-run the `gaps` command.
 - Importing `urllib`/`http`/`socket`/`requests`/`httpx` anywhere but `freshness.py` fails `test_only_the_freshness_module_may_reach_the_network`.
 - Version comparison is dotted numbers only — no pre-release, no build metadata.

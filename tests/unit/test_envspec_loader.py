@@ -12,11 +12,14 @@ import yaml
 
 from agent_skill_adapter.envspec.loader import (
     AmbiguousSpec,
+    ExtendsCycle,
     InvalidSpec,
     InvalidVersion,
     SpecNotFound,
     StaleSpec,
+    base_specs,
     capability,
+    is_inherited,
     is_stale,
     load,
     load_all,
@@ -37,6 +40,9 @@ def write_spec(
     checked_at: date = TODAY,
     stale_after_days: int = 30,
     discrepancies: list[dict[str, str]] | None = None,
+    extends: str | None = None,
+    capability_id: str = "skill.frontmatter.tool-allowlist",
+    layout_id: str | None = None,
 ) -> Path:
     """Write one minimal valid description into ``root/vendor/name.yaml``."""
     data: dict[str, Any] = {
@@ -59,14 +65,21 @@ def write_spec(
         ],
         "capabilities": [
             {
-                "id": "skill.frontmatter.tool-allowlist",
+                "id": capability_id,
                 "kind": "skill-field",
                 "support": "supported",
                 "source_id": "skills-doc",
             }
         ],
+        "layout": (
+            [{"id": layout_id, "path": ".claude/skills/", "source_id": "skills-doc"}]
+            if layout_id
+            else []
+        ),
         "discrepancies": discrepancies or [],
     }
+    if extends is not None:
+        data["extends"] = extends
     path = root / vendor / f"{name}.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
@@ -221,3 +234,81 @@ def test_only_the_freshness_module_may_reach_the_network() -> None:
         if module != allowed and REACHES_NETWORK.search(module.read_text(encoding="utf-8"))
     ]
     assert offenders == []
+
+
+def test_base_specs_walks_the_whole_chain_and_tells_inherited_from_own(tmp_path: Path) -> None:
+    """An entry of any description up the chain is inherited; the rest is the environment's own."""
+    write_spec(
+        tmp_path, "claude-code-2.1", ">=2.1.0,<2.2.0", extends="agentskills/agent-skills@1.0"
+    )
+    write_spec(
+        tmp_path,
+        "agent-skills-1.0",
+        ">=1.0,<2.0",
+        vendor="agentskills",
+        environment="agent-skills",
+        extends="agentskills/agent-skills-core@0.9",
+        capability_id="skill.frontmatter.name",
+        layout_id="skills.root",
+    )
+    write_spec(
+        tmp_path,
+        "agent-skills-core-0.9",
+        ">=0.9,<1.0",
+        vendor="agentskills",
+        environment="agent-skills-core",
+        capability_id="skill.frontmatter.description",
+    )
+
+    spec = select(tmp_path, "anthropic", "claude-code", "2.1.270", today=TODAY)
+    bases = base_specs(spec, tmp_path, today=TODAY)
+
+    assert [base.environment for base in bases] == ["agent-skills", "agent-skills-core"]
+    assert base_specs(bases[-1], tmp_path, today=TODAY) == (), "a description extending nothing"
+    assert is_inherited(bases, "skill.frontmatter.name", among="capabilities") is True
+    assert is_inherited(bases, "skills.root", among="layout") is True, "a place is inherited too"
+    assert is_inherited(bases, "skill.frontmatter.description", among="capabilities") is True, (
+        "from further up the chain too"
+    )
+    assert is_inherited(bases, "skill.frontmatter.tool-allowlist", among="capabilities") is False, (
+        "the vendor's own"
+    )
+    assert is_inherited(bases, "skills.root", among="capabilities") is False, (
+        "a place of the base declares nothing about a field of that name"
+    )
+    assert is_inherited(bases, "skill.frontmatter.name", among="layout") is False, (
+        "and a field of the base declares nothing about a place of that name"
+    )
+
+
+def test_base_specs_refuses_a_loop_instead_of_walking_forever(tmp_path: Path) -> None:
+    write_spec(
+        tmp_path, "claude-code-2.1", ">=2.1.0,<2.2.0", extends="agentskills/agent-skills@1.0"
+    )
+    write_spec(
+        tmp_path,
+        "agent-skills-1.0",
+        ">=1.0,<2.0",
+        vendor="agentskills",
+        environment="agent-skills",
+        extends="anthropic/claude-code@2.1.270",
+    )
+    spec = select(tmp_path, "anthropic", "claude-code", "2.1.270", today=TODAY)
+
+    with pytest.raises(ExtendsCycle) as error:
+        base_specs(spec, tmp_path, today=TODAY)
+
+    assert "agentskills/agent-skills@1.0" in str(error.value), "the loop is named, not just found"
+
+
+def test_base_specs_refuses_a_reference_no_description_covers(tmp_path: Path) -> None:
+    path = write_spec(
+        tmp_path, "claude-code-2.1", ">=2.1.0,<2.2.0", extends="agentskills/agent-skills@1.0"
+    )
+
+    with pytest.raises(SpecNotFound) as error:
+        base_specs(load(path), tmp_path, today=TODAY)
+
+    message = str(error.value)
+    assert "agentskills/agent-skills@1.0" in message
+    assert "anthropic/claude-code" in message, "and who asked for it"

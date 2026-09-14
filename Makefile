@@ -26,6 +26,10 @@ format: ## Automatically format and fix code style
 test: ## Run unit tests
 	$(UV) run pytest
 
+.PHONY: schema
+schema: ## Regenerate the JSON Schema of EnvSpec from the pydantic model
+	$(UV) run python -m agent_skill_adapter.envspec.schema
+
 .PHONY: check
 check: lint ## Run all quality gates (lint, typecheck, test)
 	$(UV) run mypy src tests
