@@ -1,0 +1,589 @@
+# Claude Code as the source environment.
+# Every entry is taken from the official documentation at https://code.claude.com/docs/en/.
+# Hashes are computed over the markdown version of the page (`<url>.md`), normalization v1.
+schema_version: 1
+vendor: anthropic
+environment: claude-code
+version_range: ">=2.1.0,<2.2.0"
+checked_at: 2026-09-14
+stale_after_days: 30
+normalization: v1
+
+sources:
+  - id: skills-frontmatter
+    url: https://code.claude.com/docs/en/skills
+    markdown_url: https://code.claude.com/docs/en/skills.md
+    anchor: "Frontmatter reference"
+    sha256: "75e8a5dd8482d69aef341ee608c1a0666061b0847f723aa438f56425a77fc5ee"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  - id: skills-content-lifecycle
+    url: https://code.claude.com/docs/en/skills
+    markdown_url: https://code.claude.com/docs/en/skills.md
+    anchor: "Skill content lifecycle"
+    sha256: "3c2c7d1240a4c246cca7994a7ad6afe3018f2c69d885849e85fb5f14c96585aa"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  - id: skills-listing-budget
+    url: https://code.claude.com/docs/en/skills
+    markdown_url: https://code.claude.com/docs/en/skills.md
+    anchor: "Skill descriptions are cut short"
+    sha256: "8ea281506da72d7e4e839decaac9c51e131d0fa7f65691b539099e953159c325"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  - id: subagents-frontmatter
+    url: https://code.claude.com/docs/en/sub-agents
+    markdown_url: https://code.claude.com/docs/en/sub-agents.md
+    anchor: "Supported frontmatter fields"
+    sha256: "b1ffba8e83e7e1147606b1f9b5e5a81092ab7c88df4250e9cc956d37c03a251a"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  - id: subagents-concurrent-limit
+    url: https://code.claude.com/docs/en/sub-agents
+    markdown_url: https://code.claude.com/docs/en/sub-agents.md
+    anchor: "Concurrent subagent limit"
+    sha256: "bf847bb675a8985a53febd0deb7f67fd6b0a6722e6914fc42747d2fc62219dce"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  - id: subagents-nesting-depth
+    url: https://code.claude.com/docs/en/sub-agents
+    markdown_url: https://code.claude.com/docs/en/sub-agents.md
+    anchor: "Let subagents spawn their own subagents"
+    sha256: "9f06984abe0e28ff0fa130f6dae81f5e1f233a3ae02c7f92d9631cba7441d8d3"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  - id: settings-skill-listing-budget
+    url: https://code.claude.com/docs/en/settings-reference
+    markdown_url: https://code.claude.com/docs/en/settings-reference.md
+    anchor: "`skillListingBudgetFraction`"
+    sha256: "2f6c3883123ff8b3bb17a00a92df124b22aab68540e8d68769212de0817026f2"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  - id: hooks-lifecycle
+    url: https://code.claude.com/docs/en/hooks
+    markdown_url: https://code.claude.com/docs/en/hooks.md
+    anchor: "Hook lifecycle"
+    sha256: "6477fb7b204753ff053c1af71d4209f53e36a658799ec5d33c8aac024b4945fb"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  - id: hooks-locations
+    url: https://code.claude.com/docs/en/hooks
+    markdown_url: https://code.claude.com/docs/en/hooks.md
+    anchor: "Hook locations"
+    sha256: "0ac7a809b5f410f19625b2403cb933521d3a81a9f54e42b90e83a7b438ab4fa2"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  - id: settings-files
+    url: https://code.claude.com/docs/en/settings
+    markdown_url: https://code.claude.com/docs/en/settings.md
+    anchor: "Settings files and who they affect"
+    sha256: "6ac6c355c8b0a564aa46364984ef7f6596c5c13f03ff06f3c188d6e2351bbcc1"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+  - id: claude-directory-files
+    url: https://code.claude.com/docs/en/claude-directory
+    markdown_url: https://code.claude.com/docs/en/claude-directory.md
+    anchor: "File reference"
+    sha256: "6566b6eef9ac4c4938bd1d62b245173d774ae4afd55cf5951ab2b9c822c0576c"
+    checked_at: 2026-09-14
+    environment_version: "2.1.270"
+
+capabilities:
+  # Skill frontmatter fields, in the order of the documentation table.
+  - id: skill.frontmatter.name
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "display name in skill listings; defaults to the directory name"
+  - id: skill.frontmatter.description
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "what the skill does and when to use it; falls back to the first non-empty content line"
+  - id: skill.frontmatter.when_to_use
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "extra trigger context appended to description in the skill listing"
+  - id: skill.frontmatter.argument-hint
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "autocomplete hint for expected arguments"
+  - id: skill.frontmatter.arguments
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "named positional arguments for $name substitution; space-separated string or YAML list"
+  - id: skill.frontmatter.disable-model-invocation
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "prevents automatic loading; since v2.1.196 also blocks scheduled-task invocation"
+  - id: skill.frontmatter.user-invocable
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "false hides the skill from the / menu; default true"
+  - id: skill.frontmatter.allowed-tools
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "tools pre-approved for the invoking turn; the grant clears on the next user message"
+  - id: skill.frontmatter.disallowed-tools
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "tools removed from the pool while the skill is active; cannot remove EndConversation"
+  - id: skill.frontmatter.model
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "model override for the rest of the turn; accepts /model values or inherit"
+  - id: skill.frontmatter.effort
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "low | medium | high | xhigh | max; available levels depend on the model"
+  - id: skill.frontmatter.context
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "fork runs the skill in a forked subagent context"
+  - id: skill.frontmatter.agent
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "subagent type used when context: fork is set"
+  - id: skill.frontmatter.background
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    since_version: "2.1.218"
+    note: "only with context: fork; false waits for the forked subagent in the invoking turn"
+  - id: skill.frontmatter.hooks
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "hooks registered on invocation and kept for the rest of the session"
+  - id: skill.frontmatter.paths
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "glob patterns that gate automatic activation"
+  - id: skill.frontmatter.shell
+    kind: skill-field
+    support: supported
+    source_id: skills-frontmatter
+    note: "bash (default) or powershell for inline !`command` blocks"
+  - id: skill.frontmatter.metadata
+    kind: skill-field
+    support: unsupported
+    source_id: skills-frontmatter
+    note: "free-form YAML map for your own tooling: \"Claude Code doesn't act on its contents, and drops a value that isn't a map\""
+  - id: skill.frontmatter.license
+    kind: skill-field
+    support: unsupported
+    source_id: skills-frontmatter
+    note: "Agent Skills spec field: \"Claude Code accepts the field but doesn't act on it\""
+  - id: skill.frontmatter.compatibility
+    kind: skill-field
+    support: unsupported
+    source_id: skills-frontmatter
+    note: "Agent Skills spec field, string up to 500 characters: \"Claude Code accepts the field but doesn't act on it\""
+
+  # Subagent frontmatter fields, in the order of the documentation table.
+  - id: subagent.frontmatter.name
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "required; lowercase letters and hyphens, no ':'; hooks receive it as agent_type"
+  - id: subagent.frontmatter.description
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "required; when Claude should delegate to this subagent"
+  - id: subagent.frontmatter.tools
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "tools the subagent may use; inherits all subagent tools when omitted"
+  - id: subagent.frontmatter.disallowedTools
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "tools denied; an entry with a specifier still removes the whole tool"
+  - id: subagent.frontmatter.model
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "sonnet | opus | haiku | fable | full model id | inherit"
+  - id: subagent.frontmatter.permissionMode
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "default | acceptEdits | auto | dontAsk | bypassPermissions | plan | manual; the manual alias needs v2.1.200+; ignored for plugin subagents"
+  - id: subagent.frontmatter.maxTurns
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "agentic turn cap; marking the output as partial requires v2.1.246 or later"
+  - id: subagent.frontmatter.skills
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "skills preloaded into the subagent context at startup, full content injected"
+  - id: subagent.frontmatter.mcpServers
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "server names or inline definitions; ignored for plugin subagents"
+  - id: subagent.frontmatter.hooks
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "lifecycle hooks scoped to this subagent; ignored for plugin subagents"
+  - id: subagent.frontmatter.memory
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "persistent memory scope: user | project | local"
+  - id: subagent.frontmatter.background
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "true keeps the subagent in the background even when Claude asks for the foreground"
+  - id: subagent.frontmatter.effort
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "low | medium | high | xhigh | max; available levels depend on the model"
+  - id: subagent.frontmatter.isolation
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "worktree runs the subagent in a temporary git worktree"
+  - id: subagent.frontmatter.color
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "red | blue | green | yellow | purple | orange | pink | cyan"
+  - id: subagent.frontmatter.initialPrompt
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "auto-submitted first user turn when the agent runs as the main session agent"
+  - id: subagent.frontmatter.experimental
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    note: "map of experimental options; cacheTtl accepts 5m or 1h"
+
+  # Documented ceilings that carry no size unit, so `limits` (bytes | characters | tokens)
+  # cannot hold them: per D02 each is a capability entry with the number in `note`.
+  - id: subagent.limit.concurrent
+    kind: subagent-field
+    support: supported
+    source_id: subagents-concurrent-limit
+    note: "20 running subagents per session by default; spawning another with the Agent tool then fails with Concurrent subagent limit reached"
+  - id: subagent.limit.spawn-depth
+    kind: subagent-field
+    support: supported
+    source_id: subagents-nesting-depth
+    note: "3 layers of subagents below the main conversation by default; CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH changes it, 1 turns nesting off"
+  - id: settings.skillListingBudgetFraction
+    kind: settings-file
+    support: supported
+    source_id: settings-skill-listing-budget
+    note: "share of the context window reserved for the skill listing; default 0.01, that is 1% of the context window"
+
+  # Hook events, in the order of the documentation lifecycle table.
+  - id: hook.event.SessionStart
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a session begins or resumes"
+  - id: hook.event.Setup
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "on --init-only, or --init / --maintenance in -p mode"
+  - id: hook.event.UserPromptSubmit
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when you submit a prompt, before Claude processes it"
+  - id: hook.event.UserPromptExpansion
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a user-typed command expands into a prompt; can block the expansion"
+  - id: hook.event.PreToolUse
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "before a tool call executes; can block it"
+  - id: hook.event.PermissionRequest
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a tool call needs a permission decision"
+  - id: hook.event.PermissionDenied
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when auto mode denies a tool call"
+  - id: hook.event.PostToolUse
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "after a tool call succeeds"
+  - id: hook.event.PostToolUseFailure
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "after a tool call fails"
+  - id: hook.event.PostToolBatch
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "after a batch of parallel tool calls resolves, before the next model call"
+  - id: hook.event.Notification
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when Claude Code sends a notification"
+  - id: hook.event.MessageDisplay
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "while assistant message text is displayed"
+  - id: hook.event.SubagentStart
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a subagent is spawned"
+  - id: hook.event.SubagentStop
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a subagent finishes"
+  - id: hook.event.TaskCreated
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a task is being created via TaskCreate"
+  - id: hook.event.TaskCompleted
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a task is being marked as completed"
+  - id: hook.event.Stop
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when Claude finishes responding"
+  - id: hook.event.StopFailure
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when the turn ends due to an API error"
+  - id: hook.event.TeammateIdle
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when an agent team teammate is about to go idle"
+  - id: hook.event.InstructionsLoaded
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a CLAUDE.md or .claude/rules/*.md file is loaded into context"
+  - id: hook.event.ConfigChange
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a configuration file changes during a session"
+  - id: hook.event.CwdChanged
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when the working directory changes"
+  - id: hook.event.DirectoryAdded
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a working directory is added mid-session via /add-dir"
+  - id: hook.event.FileChanged
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a watched file changes on disk; matcher selects the filenames"
+  - id: hook.event.WorktreeCreate
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a worktree is being created; replaces default git behavior"
+  - id: hook.event.WorktreeRemove
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a worktree is being removed at session exit or subagent finish"
+  - id: hook.event.PreCompact
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "before context compaction"
+  - id: hook.event.PostCompact
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "after context compaction completes"
+  - id: hook.event.PreModelSwitch
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "before a requested model switch is applied; can block the switch"
+  - id: hook.event.PostModelSwitch
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "after the session model changes"
+  - id: hook.event.Elicitation
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when an MCP server requests user input during a tool call"
+  - id: hook.event.ElicitationResult
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "after a user responds to an MCP elicitation, before the reply reaches the server"
+  - id: hook.event.SessionEnd
+    kind: hook-event
+    support: supported
+    source_id: hooks-lifecycle
+    note: "when a session terminates"
+
+  # Settings files that carry configuration a transfer has to account for.
+  - id: settings.file.user
+    kind: settings-file
+    support: supported
+    source_id: settings-files
+    note: "~/.claude/settings.json — you, in every project on this machine"
+  - id: settings.file.project
+    kind: settings-file
+    support: supported
+    source_id: settings-files
+    note: ".claude/settings.json — everyone working in the folder that contains it"
+  - id: settings.file.project-local
+    kind: settings-file
+    support: supported
+    source_id: settings-files
+    note: ".claude/settings.local.json — you, in this one project only; kept out of git"
+  - id: settings.file.managed
+    kind: settings-file
+    support: supported
+    source_id: settings-files
+    note: "managed-settings.json and other managed sources; nothing you set overrides it"
+  - id: settings.file.claude-json
+    kind: settings-file
+    support: supported
+    source_id: settings-files
+    note: "~/.claude.json — app state Claude Code writes for itself; sign-in, MCP servers, per-project state"
+  - id: settings.file.plugin-hooks
+    kind: settings-file
+    support: supported
+    source_id: hooks-locations
+    note: "a plugin's hooks/hooks.json — hooks bundled with the plugin, active while it is enabled"
+
+layout:
+  - id: skills.project
+    path: ".claude/skills/<name>/SKILL.md"
+    source_id: claude-directory-files
+  - id: skills.user
+    path: "~/.claude/skills/<name>/SKILL.md"
+    source_id: claude-directory-files
+  - id: commands.project
+    path: ".claude/commands/*.md"
+    source_id: claude-directory-files
+  - id: commands.user
+    path: "~/.claude/commands/*.md"
+    source_id: claude-directory-files
+  - id: agents.project
+    path: ".claude/agents/*.md"
+    source_id: claude-directory-files
+  - id: agents.user
+    path: "~/.claude/agents/*.md"
+    source_id: claude-directory-files
+  - id: agent-memory.project
+    path: ".claude/agent-memory/<name>/"
+    source_id: claude-directory-files
+  - id: agent-memory.user
+    path: "~/.claude/agent-memory/<name>/"
+    source_id: claude-directory-files
+  - id: settings.project
+    path: ".claude/settings.json"
+    source_id: claude-directory-files
+  - id: settings.project-local
+    path: ".claude/settings.local.json"
+    source_id: claude-directory-files
+  - id: settings.user
+    path: "~/.claude/settings.json"
+    source_id: claude-directory-files
+  # Hooks are not a directory of their own: they are the `hooks` key of a settings file.
+  # All five locations the "Hook locations" table lists, in its order.
+  - id: hooks.user
+    path: "~/.claude/settings.json"
+    source_id: hooks-locations
+  - id: hooks.project
+    path: ".claude/settings.json"
+    source_id: hooks-locations
+  - id: hooks.project-local
+    path: ".claude/settings.local.json"
+    source_id: hooks-locations
+  - id: hooks.managed
+    # "Hook locations" names the managed tier but not its filename; the settings page names the file.
+    path: "managed-settings.json"
+    source_id: settings-files
+  - id: hooks.plugin
+    path: "hooks/hooks.json"
+    source_id: hooks-locations
+
+limits:
+  - id: skill.listing.description
+    value: 1536
+    unit: characters
+    source_id: skills-listing-budget
+  - id: skill.frontmatter.compatibility.length
+    value: 500
+    unit: characters
+    source_id: skills-frontmatter
+  - id: skill.reattach.per-skill
+    value: 5000
+    unit: tokens
+    source_id: skills-content-lifecycle
+  - id: skill.reattach.combined
+    value: 25000
+    unit: tokens
+    source_id: skills-content-lifecycle
+
+# Claude Code reads configuration from outside the repository; an adapter that sees only
+# the repository cannot report what these contribute.
+invisible_sources:
+  - id: user-settings
+    path: "~/.claude/settings.json"
+    source_id: settings-files
+  - id: managed-settings
+    path: "managed-settings.json"
+    source_id: settings-files
+  - id: claude-json-state
+    path: "~/.claude.json"
+    source_id: settings-files
+  - id: user-skills
+    path: "~/.claude/skills/"
+    source_id: claude-directory-files
+  - id: user-agents
+    path: "~/.claude/agents/"
+    source_id: claude-directory-files
+
+discrepancies: []

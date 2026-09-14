@@ -38,7 +38,8 @@ packages = ["src/agent_skill_adapter"]
 target-version = "py310"
 line-length = 100
 # Documents are records, not source: code blocks inside them are quoted as written.
-extend-exclude = ["docs/**/*.md"]
+# `.autopilot/` is the run record and vendored tooling, not project source.
+extend-exclude = ["docs/**/*.md", ".autopilot/**"]
 
 [tool.ruff.lint]
 select = [
