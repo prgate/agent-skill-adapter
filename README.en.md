@@ -49,15 +49,21 @@ Claude Code 2.1 → Google Antigravity 2.0, from documentation checked 2026-09-1
 
 | Outcome | Entries | Of which the target has no entry for |
 |---|---|---|
-| reproduced | 22 | 0 |
+| reproduced | 26 | 0 |
 | missing | 0 | 0 |
-| unknown | 70 | 8 |
+| unknown | 73 | 11 |
 | out of scope | 3 | — |
 
 Antigravity documents 2 of Claude Code's 20 skill frontmatter fields, 3 of its 33 hook
 events, and 7 of its 19 subagent fields. `missing` is zero because across all 91 of its
 documentation pages Antigravity never denies a capability in words — it enumerates what it
 supports and is silent about the rest.
+
+The count is not limited to what Claude Code's own description writes out: by declaring it
+implements the open Agent Skills specification, the environment also answers for what that
+specification states about the skill file itself — the `SKILL.md` format, its body, the
+`scripts/`, `references/` and `assets/` directories. Those entries are compared like any
+other, whether or not the Claude Code description repeats them.
 
 That distinction is the point of the report. Continuing this project is justified by
 documentation that says nothing, not by an environment that says no.

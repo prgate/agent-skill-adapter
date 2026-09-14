@@ -20,21 +20,21 @@
     }
   ],
   "counts": {
-    "reproduced": 22,
+    "reproduced": 26,
     "missing": 0,
-    "unknown": 70,
+    "unknown": 73,
     "out-of-scope": 3
   },
   "declared_by_specification": {
-    "reproduced": 2,
+    "reproduced": 6,
     "missing": 0,
-    "unknown": 1,
+    "unknown": 4,
     "out-of-scope": 3
   },
   "absent_from_target": {
     "reproduced": 0,
     "missing": 0,
-    "unknown": 8,
+    "unknown": 11,
     "out-of-scope": 0
   },
   "gaps": [
@@ -631,6 +631,83 @@
       "matched": true,
       "source_note": "~/.claude/settings.json",
       "target_note": "~/.gemini/antigravity-cli/settings.json"
+    },
+    {
+      "id": "skill.body.content",
+      "kind": "skill-field",
+      "source_support": "supported",
+      "target_support": "supported",
+      "outcome": "reproduced",
+      "origin": "specification",
+      "matched": true,
+      "source_note": "the Markdown body after the frontmatter holds the skill instructions; \"There are no format restrictions\"; recommended sections are step-by-step instructions, examples of inputs and outputs, common edge cases",
+      "target_note": "The Markdown body after the frontmatter holds the instructions the agent follows."
+    },
+    {
+      "id": "skill.body.file-references",
+      "kind": "skill-field",
+      "source_support": "supported",
+      "target_support": "unknown",
+      "outcome": "unknown",
+      "origin": "specification",
+      "matched": false,
+      "source_note": "other files are referenced by relative paths from the skill root; \"Keep file references one level deep from `SKILL.md`. Avoid deeply nested reference chains\"",
+      "target_note": "(no matching entry in the target description)"
+    },
+    {
+      "id": "skill.dir.assets",
+      "kind": "layout",
+      "source_support": "supported",
+      "target_support": "unknown",
+      "outcome": "unknown",
+      "origin": "specification",
+      "matched": false,
+      "source_note": "<skill-name>/assets/",
+      "target_note": "(no matching entry in the target description)"
+    },
+    {
+      "id": "skill.dir.references",
+      "kind": "layout",
+      "source_support": "supported",
+      "target_support": "unknown",
+      "outcome": "unknown",
+      "origin": "specification",
+      "matched": false,
+      "source_note": "<skill-name>/references/",
+      "target_note": "(no matching entry in the target description)"
+    },
+    {
+      "id": "skill.dir.scripts",
+      "kind": "layout",
+      "source_support": "supported",
+      "target_support": "supported",
+      "outcome": "reproduced",
+      "origin": "specification",
+      "matched": true,
+      "source_note": "<skill-name>/scripts/",
+      "target_note": "<skill-name>/scripts/"
+    },
+    {
+      "id": "skill.file",
+      "kind": "layout",
+      "source_support": "supported",
+      "target_support": "supported",
+      "outcome": "reproduced",
+      "origin": "specification",
+      "matched": true,
+      "source_note": "<skill-name>/SKILL.md",
+      "target_note": "<skill-name>/SKILL.md"
+    },
+    {
+      "id": "skill.file.format",
+      "kind": "skill-field",
+      "source_support": "supported",
+      "target_support": "supported",
+      "outcome": "reproduced",
+      "origin": "specification",
+      "matched": true,
+      "source_note": "\"The `SKILL.md` file must contain YAML frontmatter followed by Markdown content\"",
+      "target_note": "\"Every skill needs a `SKILL.md` file with YAML frontmatter at the top\", followed by Markdown."
     },
     {
       "id": "skill.frontmatter.agent",

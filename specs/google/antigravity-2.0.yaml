@@ -27,6 +27,13 @@ sources:
     sha256: "cd92fb5e17f6664cbb17af1c21d409b5901ae5f8c63d589c98fa57e4642b8fc0"
     checked_at: 2026-09-14
     environment_version: "2.0"
+  - id: skills-creating
+    url: https://antigravity.google/docs/skills
+    markdown_url: https://antigravity.google/docs/skills.md
+    anchor: "Creating a skill"
+    sha256: "23af7b5735a9288714543ab97b896dfdac2c01a08e3f41032a194d5b0855cbae"
+    checked_at: 2026-09-14
+    environment_version: "2.0"
   - id: skills-structure
     url: https://antigravity.google/docs/skills
     markdown_url: https://antigravity.google/docs/skills.md
@@ -258,16 +265,18 @@ capabilities:
     support: unknown
     source_id: skills-frontmatter
     note: "Not named by the frontmatter table; the page says nothing about it either way."
-  - id: skill.file.name
+  # What the pages state about the skill file itself rather than about one frontmatter field.
+  # The places the file and its bundles occupy are `layout` entries, as in the specification.
+  - id: skill.file.format
     kind: skill-field
     support: supported
-    source_id: skills-structure
-    note: "A skill is a folder whose only required file is `SKILL.md`."
-  - id: skill.bundled-resources
+    source_id: skills-creating
+    note: "\"Every skill needs a `SKILL.md` file with YAML frontmatter at the top\", followed by Markdown."
+  - id: skill.body.content
     kind: skill-field
     support: supported
-    source_id: skills-structure
-    note: "Optional `scripts/`, `examples/` and `resources/` subdirectories travel with the skill."
+    source_id: skills-creating
+    note: "The Markdown body after the frontmatter holds the instructions the agent follows."
 
   # --- Custom subagents (.md) ----------------------------------------------
   - id: subagent.frontmatter.name
@@ -672,6 +681,24 @@ capabilities:
 # layouts can be compared entry by entry. A root the documentation does not name simply
 # has no entry here — there is no such thing as an "unknown path".
 layout:
+  # Inside one skill. The paths are written from the skill root, as the specification writes
+  # them, so that the two can be matched: this page draws them under `.agents/skills/`, which
+  # `skills.project` below already records.
+  - id: skill.file
+    path: "<skill-name>/SKILL.md"
+    source_id: skills-structure
+  - id: skill.dir.scripts
+    path: "<skill-name>/scripts/"
+    source_id: skills-structure
+  # Two bundle directories with no counterpart in the specification: it names `references/`
+  # and `assets/`, this page names these. Different names are different places, and reading
+  # one as the other would credit Antigravity with reproducing something it never wrote.
+  - id: skill.dir.examples
+    path: "<skill-name>/examples/"
+    source_id: skills-structure
+  - id: skill.dir.resources
+    path: "<skill-name>/resources/"
+    source_id: skills-structure
   - id: skills.project
     path: "<workspace-root>/.agents/skills/"
     source_id: skills-location

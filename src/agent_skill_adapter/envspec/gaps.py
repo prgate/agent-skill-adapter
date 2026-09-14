@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import TypeVar
 
 from agent_skill_adapter.envspec.loader import (
     Entries,
@@ -23,7 +24,7 @@ from agent_skill_adapter.envspec.loader import (
     is_inherited,
     select,
 )
-from agent_skill_adapter.envspec.model import EnvSpec, Support
+from agent_skill_adapter.envspec.model import Capability, EnvSpec, LayoutEntry, Support
 
 
 class Outcome(str, Enum):
@@ -150,16 +151,24 @@ def compare(source: EnvSpec, target: EnvSpec, bases: Sequence[EnvSpec] = ()) -> 
     place (``reproduced``) or does not (``unknown``).
 
     ``bases`` are the descriptions ``source`` extends -- the open specification it declares
-    it implements -- and they decide each entry's :class:`Origin`, by id and by nothing else.
-    A base description states what a *format* defines, so its own ``support`` answers a
-    different question than an environment's ("the format defines this field" against "this
-    product acts on it") and is never read here. Nothing else about ``bases`` reaches the
-    comparison: the outcome still comes from the two environments alone.
+    it implements -- and they contribute both an :class:`Origin` for every entry, by id and
+    by nothing else, and the entries the source description does not spell out itself. By
+    declaring ``extends``, the source environment says it implements that format, so a field
+    the format defines and the source description leaves unwritten is still owed by the
+    source: comparing only what one description happens to repeat would drop a whole class of
+    entries -- what the format states about the skill file itself -- from the report. Those
+    inherited entries carry the base's own ``support``, which for a format means "the format
+    defines this", and are matched against the target exactly like the source's own. The
+    outcome still comes from the target description alone.
     """
     target_notes = {entry.id: entry.note for entry in target.capabilities}
     target_layout = {entry.id: entry.path for entry in target.layout}
+    capabilities = _with_inherited(
+        source.capabilities, [entry for base in bases for entry in base.capabilities]
+    )
+    places = _with_inherited(source.layout, [place for base in bases for place in base.layout])
     gaps = []
-    for entry in source.capabilities:
+    for entry in capabilities:
         support = capability(target, entry.id)
         gaps.append(
             Gap(
@@ -178,7 +187,7 @@ def compare(source: EnvSpec, target: EnvSpec, bases: Sequence[EnvSpec] = ()) -> 
                 target_note=target_notes.get(entry.id) if entry.id in target_notes else NO_ENTRY,
             )
         )
-    for place in source.layout:
+    for place in places:
         there = target_layout.get(place.id)
         support = Support.SUPPORTED if there is not None else Support.UNKNOWN
         gaps.append(
@@ -197,6 +206,24 @@ def compare(source: EnvSpec, target: EnvSpec, bases: Sequence[EnvSpec] = ()) -> 
     return GapReport(
         source=source, target=target, gaps=tuple(sorted(gaps, key=_order)), bases=tuple(bases)
     )
+
+
+_Entry = TypeVar("_Entry", Capability, LayoutEntry)
+
+
+def _with_inherited(own: Sequence[_Entry], inherited: Sequence[_Entry]) -> list[_Entry]:
+    """``own`` first, then every inherited entry the source does not declare itself, once each.
+
+    Ids repeat across a chain of extended descriptions -- the nearer one restates what the
+    further one defines -- and the nearest wins, as it does in :func:`loader.base_specs`.
+    """
+    merged = list(own)
+    seen = {entry.id for entry in own}
+    for entry in inherited:
+        if entry.id not in seen:
+            seen.add(entry.id)
+            merged.append(entry)
+    return merged
 
 
 def _origin(bases: Sequence[EnvSpec], entry_id: str, among: Entries) -> Origin:
@@ -225,7 +252,10 @@ _INTRO = (
     "reproducing. The `origin` column says who owes the entry: `specification` marks an entry "
     "the open format named above declares, so every implementation of that format is expected "
     "to carry it, and `extension` marks the source environment's own addition, which nobody "
-    "promised anywhere else. That split is what the `unknown` count needs most -- a target "
+    "promised anywhere else. The list is therefore not limited to what the source description "
+    "spells out: by declaring it implements that format, the source environment owes every "
+    "entry the format states, so entries only the specification writes down are compared here "
+    "too. That split is what the `unknown` count needs most -- a target "
     "silent about a specification field is silent about a format it claims to implement, while "
     "a silent extension is the ordinary price of moving between two different products, and "
     "one number covering both would report the second as if it were the first."
