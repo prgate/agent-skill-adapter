@@ -55,27 +55,29 @@
 <!-- autopilot:start -->
 ## Agent Skill Adapter
 
-Reads vendor documentation of two agent environments into machine-checkable YAML descriptions, then computes entry by entry what Google Antigravity does not reproduce from Claude Code. Offline and deterministic: same descriptions in, same report bytes out.
+Reads vendor documentation of two agent environments into machine-checkable YAML descriptions, computes entry by entry what Google Antigravity does not reproduce from Claude Code, then converts one skill folder over that comparison. Offline and deterministic: same descriptions in, same report bytes out.
 
 ### Commands
 - `make install` — `uv sync`; `make pre-commit-run` — CI runs this before `make check`.
 - `make check` — the gate: ruff, `ruff format --check`, mypy strict over `src tests`, pytest.
-- `make test` / `make lint` / `make format` — subsets; one file is `uv run pytest tests/unit/test_envspec_gaps.py`.
+- `make test` / `make lint` / `make format` — subsets; one file is `uv run pytest tests/unit/test_convert.py`.
+- `uv run agent-skill-adapter convert <skill-dir> --source anthropic/claude-code@2.1.0 --target google/antigravity@2.0.0 [--specs specs] [--report FILE] [--out DIR] [--scope project|user] [--allow-stale]` — the JSON report goes to stdout (or to `--report`), the same run in words to stderr, and the verdict becomes the exit code; without `--out` nothing is written anywhere.
 - `uv run python -m agent_skill_adapter.envspec.gaps [--root specs] [--out specs/gaps]` — rebuild the gap report.
 - `make schema` — regenerate `specs/schema/envspec.schema.json` from the model (`envspec/schema.py`).
 - `uv run python -m agent_skill_adapter.envspec.freshness [--root specs] [--write]` — re-fetch vendor docs; the only command that uses the network.
-- `uv run agent-skill-adapter --version` — the installed CLI does nothing else yet.
 
 ### Structure
-- `src/agent_skill_adapter/envspec/` — all working code; `cli/main.py` is a typer app with no subcommands.
+- `src/agent_skill_adapter/envspec/` — descriptions and their comparison; `convert.py` sits beside it and depends on it, never the reverse; `cli/main.py` is a typer app with `--version` and the one `convert` command.
 - `specs/<vendor>/<environment>-<version>.yaml` — hand-written descriptions; `specs/gaps/` and `specs/schema/` — generated, never hand-edited.
-- `contracts/`, `examples/`, `docs/adr/`, `tests/{e2e,transforms,fixtures}/` — `.gitkeep` placeholders; only `tests/unit/` holds tests.
+- `docs/adr/0001..0007` hold why each rule is what it is; `docs/converting-a-real-skill.md` records three real `convert` runs — its commands need `--allow-stale` from 2026-10-14, when the descriptions fall due for a re-check.
+- `contracts/`, `examples/`, `tests/{e2e,transforms,fixtures}/` — `.gitkeep` placeholders; only `tests/unit/` holds tests.
 
 ### Key files
-- `envspec/model.py` — the pydantic schema: `EnvSpec`, `Source`, `Capability`, `LayoutEntry`, `Limit`, `ToolName`, `InvisibleSource`, `Discrepancy`, `Support`, `DiscrepancyKind`.
+- `envspec/model.py` — the pydantic schema: `EnvSpec`, `Source`, `Capability` (`kind` is a closed `Literal`: `skill-field`, `subagent-field`, `hook-event`, `hook-decision`, `settings-file`), `LayoutEntry`, `Limit`, `ToolName`, `InvisibleSource`, `Discrepancy`, `Support`, `DiscrepancyKind`.
 - `envspec/normalize.py` — `section_text(markdown, anchor)`, `normalize(text)`, `digest(text)`, `AnchorError`.
-- `envspec/loader.py` — `load(path)`, `load_all(root)`, `select(root, vendor, environment, version, *, allow_stale=False, today=None)`, `is_stale(spec, today)`, `capability(spec, capability_id) -> Support`, `base_specs(spec, root, *, allow_stale=False, today=None) -> tuple[EnvSpec, ...]` (the chain the optional model field `extends: <vendor>/<environment>@<version>` names, nearest first, `()` when it names nothing), `is_inherited(bases, entry_id, *, among="capabilities"|"layout") -> bool` (membership by id inside that one list, never by the base's `support`); raises `InvalidSpec`, `InvalidVersion`, `SpecNotFound`, `AmbiguousSpec`, `StaleSpec`, `ExtendsCycle`.
+- `envspec/loader.py` — `load(path)`, `load_all(root)`, `select(root, vendor, environment, version, *, allow_stale=False, today=None)`, `is_stale(spec, today)`, `capability(spec, capability_id) -> Support`, `base_specs(spec, root, ...) -> tuple[EnvSpec, ...]` (the chain the optional model field `extends: <vendor>/<environment>@<version>` names, nearest first, `()` when it names nothing), `is_inherited(bases, entry_id, *, among="capabilities"|"layout") -> bool` (membership by id inside that one list, never by the base's `support`); raises `InvalidSpec`, `InvalidVersion`, `SpecNotFound`, `AmbiguousSpec`, `StaleSpec`, `ExtendsCycle`.
 - `envspec/gaps.py` — `compare(source, target, bases=()) -> GapReport`, `render_markdown`, `render_json`, `report_from(root)`, `main`; `Outcome` is `reproduced|missing|unknown|out-of-scope`, `Origin` is `specification|extension` (which of the source's entries the extended open specification declares).
+- `convert.py` — `convert(skill_dir, source, target, *, root="specs", out=None, scope=Scope.PROJECT, allow_stale=False) -> Conversion(verdict, exit_code, report, summary)`; `Verdict` is `clean|lossy|undecidable` (no `blocked` value until FR-36 defines a prohibition), `verdict_of(outcome, origin)` is the assembly table, `worst(verdicts)` calls an empty set `clean`; also `ConvertError(message, exit_code)`, `Scope`, `REPORT_SCHEMA`.
 - `envspec/freshness.py` — `check(spec, *, fetch, today=None) -> list[Discrepancy]`, `record(path, discrepancies)`, `markdown_url(source)`, `main(argv=None, *, fetch=_fetch)`.
 
 ### Architecture
@@ -85,20 +87,21 @@ Reads vendor documentation of two agent environments into machine-checkable YAML
 - The outcome follows what the target documents: `supported` → reproduced, `unsupported` → missing, `unknown` or no such entry → unknown. Silence is never read as a denial, so an entry the target omits is never `missing`.
 - Staleness needs no network: a recorded discrepancy, or `checked_at` older than `stale_after_days`. `select` refuses a stale description unless `allow_stale=True`.
 - `freshness` is the only module allowed to import network libraries, and it takes `fetch` as a parameter so nothing below it — and no test — needs a network.
+- `convert` reads the folder into findings (every frontmatter key, bundled directory, top-level file, declared hook event), spells each as an entry id (`skill.frontmatter.<key>`, `skill.dir.<name>`, `skill.top.<name>`, `hook.event.<name>`) and only looks that id up in `compare`'s result — it compares nothing itself and keeps no list of known names, so a name nobody documented becomes an `unknown`/`extension` row rather than vanishing. A declared hook asks two ids: its event, and `hook.decision.block` (ADR-0007 — firing an event is not the power to veto).
+- The assembly table (PRD §5.2, ADR-0006): `reproduced`/`out-of-scope` → clean/0, `missing` → lossy/1, `unknown` → lossy/1 on an `extension` but undecidable/3 on a `specification` entry, because a target silent about a format it claims to implement leaves nothing to judge. A run's verdict is the worst of its properties.
+- With `--out`, every destination comes from the target's `layout` (`skills.project`/`skills.user`, `skill.file`, `skill.dir.*`, `hooks.project`/`hooks.user`) with `<skill-name>`, `<workspace-root>` and `~` expanded — no path is ever spelled in the converter. The whole plan is checked for collisions and for escapes out of `--out` before the first byte is written, an `undecidable` run assembles nothing, and a hook entry is staged beside the skill for a person to merge by hand.
 
 ### Code conventions
-- English everywhere except `.autopilot/` (Russian, the run record; excluded from ruff).
-- ruff `line-length = 100`, target py310, rules `E W F I B UP`; mypy strict covers `src` and `tests`.
+- English everywhere except `.autopilot/` (Russian, the run record; excluded from ruff); ruff `line-length = 100`, target py310, rules `E W F I B UP`; mypy strict covers `src` and `tests`.
 - Field names describe the description format, never one vendor's vocabulary — what an environment calls its own fields belongs in the YAML data.
 - A deliberate simplification carries a `# ponytail:` comment naming its ceiling and upgrade path.
 
 ### Environment
-- Python 3.10 (`.python-version`), uv-managed `.venv`; no environment variables, no services, no secrets in the repository.
-- Dependencies: pydantic, pyyaml, typer, rich; dev: pytest, mypy, ruff, pre-commit. Adding another is CFP Level 3.
+- Python 3.10 (`.python-version`), uv-managed `.venv`; no environment variables, services or secrets. Dependencies: pydantic, pyyaml, typer, rich; dev: pytest, mypy, ruff, pre-commit — adding another is CFP Level 3.
 
 ### Tests
-- `make check` → ruff + mypy strict + 53 passed.
-- Four seams: `normalize` (text → hash), `loader` (tree → selection → staleness), `gaps` (`compare` on two tiny descriptions), `freshness` (injected `fetch`).
+- `make check` → ruff + mypy strict + 102 passed.
+- Five seams: `normalize` (text → hash), `loader` (tree → selection → staleness), `gaps` (`compare` on two tiny descriptions), `freshness` (injected `fetch`), `convert` (a temporary skill folder against two tiny descriptions — the internal steps are never tested apart from it).
 
 ### Pitfalls
 - `AGENTS.md` must stay at 120 lines or fewer and `CLAUDE.md`/`GEMINI.md` must remain symlinks to it, or `tests/unit/test_governance.py` fails.
@@ -107,13 +110,10 @@ Reads vendor documentation of two agent environments into machine-checkable YAML
 - Importing `urllib`/`http`/`socket`/`requests`/`httpx` anywhere but `freshness.py` fails `test_only_the_freshness_module_may_reach_the_network`.
 - Version comparison is dotted numbers only — no pre-release, no build metadata.
 - Exit codes read backwards on purpose: `gaps.main` returns 1 when nothing is missing or unknown (the transfer would be a file copy), while `freshness.main` returns 0 even with discrepancies found, and 2 only for a missing or empty root.
+- `convert` exits 0/1/3 with the verdict, 6 when the folder is not a readable skill and 8 on a collision with an earlier result; 6 and 8 are not verdicts and leave the computed one alone. There is no code 2, and every outcome — refusals included — still prints a report, whose `error` field says why it is thin.
 
 ### How Autopilot works here
-
-Сборка ведётся навыком `/autopilot`. Требования, спецификация и таски — в `.autopilot/`.
-Прогресс — `.autopilot/dashboard.html`. Правило: требование из `manifest.md`
-может снять только пользователь.
-
-Если работа продолжается — скажи «продолжи автопилот»: состояние поднимется
-из `.autopilot/state.js`, переспрашивать ничего не нужно.
+Сборка ведётся навыком `/autopilot`: требования, спецификация и таски — в `.autopilot/`,
+прогресс — `.autopilot/dashboard.html`, состояние — `.autopilot/state.js` («продолжи
+автопилот» поднимет его). Требование из `manifest.md` может снять только пользователь.
 <!-- autopilot:end -->
