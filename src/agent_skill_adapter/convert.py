@@ -62,11 +62,20 @@ COLLISION = 8
 """Something is already at a destination this run would have written."""
 
 REPORT_UNWRITABLE = 11
-"""The report was produced and the place named for it would not take it.
+"""The report was produced and the place named for it would not take it: row 11 of FR-27.
 
-FR-27 keeps 11 to 63 for outcomes it has not had to name yet, and this is one of them.
-Code 7 would have said the assembled skill failed the check made before writing, which is
-a different thing and did not happen; the run is otherwise whatever the table decided.
+It stands over `UNSTOPPED` and over nothing else. Code 7 would have said the assembled skill
+failed the check made before writing, which is a different thing and did not happen.
+"""
+
+UNSTOPPED = (EXIT_CODE[Verdict.CLEAN], EXIT_CODE[Verdict.LOSSY])
+"""The codes of a run nothing stopped: the skill was judged and the code is its verdict.
+
+Only these give way to something that goes wrong after the judgement. FR-27 gives the run
+the code of whatever stopped it earliest, and a report that will not go where it was asked
+for is the latest thing that can go wrong: 11 over a 3 or a 6 would answer about the report
+to a caller asking what happened to the skill. Nothing is hidden by that -- the report
+reaches standard output either way (FR-26), and its `error` names both reasons.
 """
 
 REFUSAL_VERDICT = {EXIT_CODE[Verdict.UNDECIDABLE]: Verdict.UNDECIDABLE}
@@ -108,8 +117,8 @@ BLOCK = "hook.decision.block"
 """Firing an event and stopping what it precedes are two entries, so a hook asks about both.
 
 A target that documents the event says nothing by that about whether a hook of it can
-refuse the tool call. Asked as one question, the event's `supported` would answer for both
-and the lost veto would never reach the report.
+refuse the tool call, so the two are graded apart. Why the descriptions carry the pair
+split rather than the converter treating hooks specially is ADR-0007.
 """
 
 
@@ -149,19 +158,28 @@ HOOKS_KEY = "hooks"
 """The file and the frontmatter key of the source environment this command opens by name."""
 
 SKILL_FILE_BYTES = 1024 * 1024
+"""How much of a skill file this command reads before refusing to read any of it.
+
+Not the size limit of an environment, which is the other limit a skill file has: that one
+is a documented property of the target (FR-32 keeps it in the `limits` of a description),
+a file past it is split rather than refused (FR-33), and exceeding it is its own outcome
+with its own exit code 9 (NFR-2). This one is a guard on reading a stranger's repository,
+so overrunning it is code 6 -- nothing was read, so there is nothing to judge. It guards
+the reading and not the parsing: a file is measured before it is opened, or the folder
+decides how many bytes this command pulls into memory before any limit is consulted.
+
+# ponytail: one number for any skill file, whatever the target environment allows. The way
+# up is to read the target's own limit out of the `limits` of its description (FR-32) and
+# split what exceeds it (FR-33), after which this number goes back to guarding only how
+# much of a stranger's file is pulled into memory.
+"""
+
 FRONTMATTER_BYTES = 64 * 1024
 FRONTMATTER_DEPTH = 16
-"""What is read, what a header may weigh, and how deep it may nest before refusal (FR-15).
+"""What a header may weigh and how deep it may nest before the file is refused (FR-15).
 
-All three are far above anything a person writes and far below what would cost this command
-its memory or its stack. The first one guards the reading and not the parsing: a file is
-measured before it is opened, or a repository somebody else wrote decides how many bytes
-this command pulls into memory before any limit is consulted.
-
-# ponytail: one number for any skill file, rather than the limit the target environment sets
-# on its own (FR-32 puts that in the `limits` of a description, and FR-33 splits a file that
-# exceeds it). This one is a guard on reading a stranger's repository, not a claim about
-# either environment.
+Both are far above anything a person writes and far below what would cost this command its
+memory or its stack.
 """
 
 # ponytail: named here because the format of the descriptions has no field for "this entry
@@ -170,11 +188,17 @@ this command pulls into memory before any limit is consulted.
 REQUIRED_FIELDS = ("description",)
 """The frontmatter keys a skill file must carry, taken from what the descriptions do mark.
 
-The target description calls `description` Required, and so does the open specification the
-source implements; the source environment lets it fall back to the first non-empty line of
-the body, and filling it in from there would be a translation rule (FR-6) this command does
-not have. `name` is not here: both environments say it defaults to the folder name, so a
-file without it is a legal skill file, and refusing it would be a rule of our own invention.
+Where the descriptions disagree, the environment that loads the file decides, because its
+word is the refusal a person actually meets. The open specification decides where an entry
+came from -- whether the target was obliged to document it -- and not what a runtime accepts.
+
+`description` is here: the target description marks it required, the open specification
+marks it required, and the source environment lets it fall back to the first non-empty line
+of the body -- filling it in from there would be a translation rule (FR-6) this command does
+not have. `name` is not, and the two sides do disagree about it: the open specification
+marks it required and has it match the parent directory name, while both environments say it
+defaults to the directory name when omitted. Both runtimes load such a file, so demanding it
+here would refuse a skill file that works in either one.
 """
 
 

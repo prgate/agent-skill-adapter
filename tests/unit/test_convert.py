@@ -12,7 +12,7 @@ import yaml
 from typer.testing import CliRunner
 
 from agent_skill_adapter.cli.main import app
-from agent_skill_adapter.convert import Scope, Verdict, convert
+from agent_skill_adapter.convert import WORKAROUNDS, Scope, Verdict, convert
 from agent_skill_adapter.envspec.model import EnvSpec
 
 runner = CliRunner()
@@ -252,12 +252,16 @@ def test_a_field_the_descriptions_call_optional_is_not_demanded_here(tmp_path: P
 
     Requiring it would be this command inventing a rule about environments it only reads
     about -- and inventing it in the harshest form there is, a refusal to read the file at
-    all. What a field is worth is written in the descriptions, and `name` says "optional".
+    all. The open specification does mark `name` required; both environments say it defaults
+    to the directory name, and the runtime that loads the file is the one whose refusal a
+    person meets.
     """
     root = four_row_tree(tmp_path)
     folder = tmp_path / "example"
     folder.mkdir()
-    (folder / "SKILL.md").write_text("---\ndescription: what it does\n---\n\nBody.\n")
+    (folder / "SKILL.md").write_text(
+        "---\ndescription: what it does\n---\n\nBody.\n", encoding="utf-8"
+    )
 
     result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
 
@@ -346,7 +350,10 @@ def test_a_declared_hook_asks_about_the_event_and_about_the_power_to_stop_it(
         "hook.decision.block": ("unknown", "extension", "lossy"),
     }
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
-    assert len(set(result.report["advice"])) == 3
+    # Three ways out, and the three the module offers: the count is pinned here and not
+    # read off the constant, or an emptied constant would agree with an empty report.
+    assert len(result.report["advice"]) == 3
+    assert result.report["advice"] == list(WORKAROUNDS["hook-decision"])
 
 
 def test_a_hook_no_description_declares_still_earns_the_ways_out(tmp_path: Path) -> None:
@@ -367,7 +374,8 @@ def test_a_hook_no_description_declares_still_earns_the_ways_out(tmp_path: Path)
 
     assert properties(unheard_of.report)["hook.event.Stop"] == ("unknown", "extension", "lossy")
     assert unheard_of.report["advice"] == written_down.report["advice"]
-    assert len(set(unheard_of.report["advice"])) == 3
+    assert len(unheard_of.report["advice"]) == 3
+    assert unheard_of.report["advice"] == list(WORKAROUNDS["hook-event"])
 
 
 def test_the_lost_veto_names_every_hook_it_was_asked_about(tmp_path: Path) -> None:
@@ -700,3 +708,26 @@ def test_a_report_that_cannot_be_written_is_still_issued_and_says_so(tmp_path: P
     assert issued["outcome"] == "clean"
     assert str(nowhere) in issued["error"]
     assert "(exit 11)" in result.stderr
+
+
+def test_a_run_that_was_stopped_keeps_its_code_over_the_unwritten_report(tmp_path: Path) -> None:
+    """Code 11 stands over a run nothing stopped, never over a refusal (FR-27).
+
+    The folder below holds no `SKILL.md`, so the run stops at code 6 before it judges
+    anything, and `--report` then names a place that does not exist either. A caller reads
+    the code to learn what happened to the skill, and exiting 11 would answer about the
+    report instead -- the later mishap costing the earlier stop its answer. Both reasons are
+    in `error`, and the report is on standard output where an unwritten one goes.
+    """
+    root = assembly_tree(tmp_path)
+    folder = tmp_path / "example"
+    folder.mkdir()
+    nowhere = tmp_path / "no-such-folder" / "report.json"
+
+    result = runner.invoke(app, [*cli_arguments(folder, root), "--report", str(nowhere)])
+    issued = json.loads(result.stdout)
+
+    assert result.exit_code == 6
+    assert issued["exit_code"] == 6
+    assert str(folder) in issued["error"]
+    assert str(nowhere) in issued["error"]

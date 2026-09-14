@@ -101,10 +101,13 @@ def convert_command(
             # Left to itself this is a traceback, and a traceback exits 1 -- the code for a
             # transfer that lost something, which is an answer about the skill given for a
             # mistake in the arguments. The report itself is still issued (FR-26), on the
-            # stream it would have taken had `--report` not been given.
+            # stream it would have taken had `--report` not been given. A run that was
+            # already stopped keeps the code of what stopped it: FR-27 gives the run the
+            # earliest stop, and this is the latest thing that can go wrong.
+            unstopped = result.exit_code in convert_module.UNSTOPPED
             result = convert_module.refused(
                 result,
-                convert_module.REPORT_UNWRITABLE,
+                convert_module.REPORT_UNWRITABLE if unstopped else result.exit_code,
                 f"{report}: the report could not be written here ({error}), "
                 "so it went to standard output instead",
             )

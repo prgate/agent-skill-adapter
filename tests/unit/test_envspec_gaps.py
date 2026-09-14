@@ -93,37 +93,6 @@ def test_outcome_follows_what_the_target_says() -> None:
     }
 
 
-def test_the_power_to_block_is_an_entry_of_its_own() -> None:
-    """What a hook may decide is a `hook-decision` entry, judged apart from the event.
-
-    An environment that fires the event says nothing about whether a hook of it can stop
-    what is about to happen. Kept in one entry, the event's `supported` would answer for
-    both and the lost veto would never reach the report.
-    """
-    source = build(
-        vendor="anthropic",
-        environment="claude-code",
-        capabilities=[
-            {"id": "hook.event.PreToolUse", "kind": "hook-event", "support": Support.SUPPORTED},
-            {"id": "hook.decision.block", "kind": "hook-decision", "support": Support.SUPPORTED},
-        ],
-    )
-    target = build(
-        vendor="google",
-        environment="antigravity",
-        capabilities=[
-            {"id": "hook.event.PreToolUse", "kind": "hook-event", "support": Support.SUPPORTED},
-        ],
-    )
-
-    judged = {gap.id: (gap.kind, gap.outcome) for gap in compare(source, target).gaps}
-
-    assert judged == {
-        "hook.event.PreToolUse": ("hook-event", Outcome.REPRODUCED),
-        "hook.decision.block": ("hook-decision", Outcome.UNKNOWN),
-    }
-
-
 def test_layout_entry_absent_from_the_target_is_unknown_not_missing() -> None:
     """A place the target does not document is silence, never a documented denial."""
     source = build(

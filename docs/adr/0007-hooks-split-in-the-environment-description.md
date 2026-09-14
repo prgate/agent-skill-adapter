@@ -6,11 +6,11 @@ PRD §5 deferred what to do with skills that rely on hooks: forbid the transfer,
 outside into a git hook or a CI step. Both options assume the converter decides something about
 hooks.
 
-The question exists because one description entry answers two things at once. Claude Code documents
-`hook.event.PreToolUse` as "before a tool call executes; can block it": an event that fires, and an
-authority to deny the action. Antigravity documents the same event, and says nothing about what a
-non-zero exit code from a hook does. Graded as one entry, the pair is unanswerable — the target
-reproduces half of it.
+The question exists because one description entry answers two things at once. The Claude Code hook
+lifecycle states two of them about `hook.event.PreToolUse`: that it fires before a tool call
+executes, and that a hook of it can stop that call — an event, and an authority to deny the action.
+Antigravity documents the same event, and says nothing about what a non-zero exit code from a hook
+does. Graded as one entry, the pair is unanswerable — the target reproduces half of it.
 
 ## Decision Outcome
 
@@ -25,10 +25,10 @@ PRD §5.2 applies unchanged: `unknown` on an extension is `lossy` — transfer w
 what a non-zero exit code does, so blocking is not confirmed. The word "hook" appears in no branch
 of the converter.
 
-The report carries the human-facing alternatives as text: move the prohibition into the skill body,
-move the check into pre-commit or a CI step, or collapse the event to the nearest supported one.
-The converter picks none of them — FR-22 forbids it from parsing the command body, so it cannot
-tell which alternative fits a given hook, and a person can.
+The report carries the human-facing alternatives as text; PRD §5.3 names the three of them and what
+each one costs, and the report prints the same three. The converter picks none of them — FR-22
+forbids it from parsing the command body, so it cannot tell which alternative fits a given hook, and
+a person can.
 
 ## Considered Options
 

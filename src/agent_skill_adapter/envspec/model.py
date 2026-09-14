@@ -76,9 +76,9 @@ class Capability(_Entry):
     """What the entry is about.
 
     ``hook-event`` is that the environment fires an event; ``hook-decision`` is what a hook
-    of it may decide -- to stop what is about to happen, say. They are two entries because
-    they are two claims: an environment can fire an event it lets no hook veto, and one
-    entry answering for both would let a lost veto pass for a reproduced one.
+    of it may decide -- to stop what is about to happen, say. Two kinds because they are two
+    claims: an environment can fire an event it lets no hook veto. Why the pair is split
+    here rather than handled in the converter is ADR-0007.
     """
 
     support: Support

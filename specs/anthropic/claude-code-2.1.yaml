@@ -484,10 +484,9 @@ capabilities:
     source_id: hooks-lifecycle
     note: "when a session terminates"
 
-  # What a hook may decide, kept apart from the events above. The lifecycle table states
-  # two different things about PreToolUse: when it fires, and that a hook of it can stop
-  # the tool call. Held in one entry, the event's `supported` would answer for both, and a
-  # target that fires the event without honouring the veto would read as reproducing it.
+  # What a hook may decide, kept apart from the events above: the lifecycle table states
+  # two different things about PreToolUse -- when it fires, and that a hook of it can stop
+  # the tool call -- and two claims are two entries here (ADR-0007).
   - id: hook.decision.block
     kind: hook-decision
     support: supported

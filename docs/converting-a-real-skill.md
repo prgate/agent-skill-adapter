@@ -59,6 +59,9 @@ uv run agent-skill-adapter convert ~/.claude/skills/autopilot … --out /tmp/out
   lossy        skill.dir.prompts -- bundled directory `prompts/` (unknown, extension); no entry with this id in either description
   lossy        skill.dir.tools -- bundled directory `tools/` (unknown, extension); no entry with this id in either description
   wrote /tmp/out/.agents/skills/autopilot/SKILL.md (it belongs at .agents/skills/autopilot/SKILL.md)
+  advice: `phases/` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
+  advice: `prompts/` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
+  advice: `tools/` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
 ```
 
 `argument-hint` is Claude Code's own field, and `phases/`, `prompts/` and `tools/` are this
@@ -66,7 +69,9 @@ skill's own directories: no open format ever promised them elsewhere, so their l
 ordinary price of moving between two products, and the exit code says the transfer is worth
 making with eyes open. The three directories are not carried to an invented place — the
 target description names none for them — and each is a line of the report rather than a
-silence.
+silence. The `advice:` lines are the other half of that: what was written is one list and
+what was left behind is another, and a folder missing from the first one reads the same
+whether nothing could be done with it or the run never got that far.
 
 ## 3. A skill that does not transfer — exit code 3
 
