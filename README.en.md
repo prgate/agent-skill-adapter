@@ -64,6 +64,28 @@ documentation that says nothing, not by an environment that says no.
 
 Full list: [`specs/gaps/claude-code-to-antigravity.md`](specs/gaps/claude-code-to-antigravity.md).
 
+## What exists and what does not
+
+**Nothing is converted yet.** Today the tool answers one question — what exactly a transfer
+loses — and moves no files at all. The PRD requires that answer **before** any work on the
+core: had nothing turned out to be untransferable, the product would reduce to copying
+files and would not be worth building.
+
+What works:
+
+- descriptions of two environments, every record anchored to a documentation section by
+  url, anchor and digest;
+- the loader: selection by environment version, refusal on a stale or ambiguous
+  description;
+- the freshness check against the vendor documentation, recording drift into the
+  description file itself;
+- the computed gap list.
+
+Not built yet: reading a repository of skills, grading each capability of a transfer, the
+transfer report, rewriting skill text for the target environment, emitting the result, and
+the exit codes. Those are blocks B–F of
+[PRD-001](docs/prd/PRD-001-agent-skill-adapter.md).
+
 ## Quick start
 
 Requires Python 3.10+ and [uv](https://github.com/astral-sh/uv).
@@ -113,12 +135,12 @@ by a CI log.
 
 - **It does not install anything.** Laying files out per environment is what `npx skills`
   is for; this produces the standard shape and hands it over.
-- **It does not write skills.** It moves existing ones.
+- **It does not write skills.** The intent is to move existing ones.
 - **It does not test behaviour on a live model.** Whether a skill still behaves the same is
   a separate, paid kind of run, and it is deliberately not mixed in here.
 
-The first version goes one way — Claude Code → Google Antigravity — and takes a repository
-as input.
+One direction only: Claude Code → Google Antigravity. The planned input is a whole
+repository; a single skill outside one is not in scope yet.
 
 ## Where to read more
 
