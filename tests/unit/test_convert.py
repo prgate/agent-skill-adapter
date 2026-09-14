@@ -9,9 +9,13 @@ from typing import Any
 
 import pytest
 import yaml
+from typer.testing import CliRunner
 
+from agent_skill_adapter.cli.main import app
 from agent_skill_adapter.convert import Scope, Verdict, convert
 from agent_skill_adapter.envspec.model import EnvSpec
+
+runner = CliRunner()
 
 TODAY = date(2026, 9, 14)
 SOURCE = "anthropic/claude-code@1.0.0"
@@ -61,9 +65,15 @@ def write(
 
 
 def skill(folder: Path, frontmatter: str, *, directories: tuple[str, ...] = ()) -> Path:
-    """A skill folder with the given frontmatter and bundled directories."""
+    """A skill folder with the given frontmatter and bundled directories.
+
+    `description` is written for every case: it is a required field, so a folder without it
+    is not a skill folder at all, and the cases about that live in `BROKEN` as raw bytes.
+    """
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "SKILL.md").write_text(f"---\n{frontmatter}---\n\nBody.\n", encoding="utf-8")
+    (folder / "SKILL.md").write_text(
+        f"---\ndescription: what it does\n{frontmatter}---\n\nBody.\n", encoding="utf-8"
+    )
     for name in directories:
         (folder / name).mkdir()
     return folder
@@ -94,6 +104,7 @@ def four_row_tree(tmp_path: Path) -> Path:
         extends="agentskills/agent-skills@1.0.0",
         capabilities=[
             {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
             {"id": "skill.frontmatter.model", "support": "supported"},
             {"id": "skill.frontmatter.deprecated", "support": "supported"},
         ],
@@ -104,6 +115,7 @@ def four_row_tree(tmp_path: Path) -> Path:
         environment="antigravity",
         capabilities=[
             {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
             {"id": "skill.frontmatter.deprecated", "support": "unsupported"},
         ],
         layout=[{"id": "skill.dir.scripts", "path": "<skill-name>/scripts/"}],
@@ -127,6 +139,7 @@ def test_the_assembly_table_turns_each_outcome_into_a_verdict(tmp_path: Path) ->
 
     assert properties(result.report) == {
         "skill.frontmatter.name": ("reproduced", "extension", "clean"),
+        "skill.frontmatter.description": ("reproduced", "extension", "clean"),
         "skill.frontmatter.model": ("unknown", "extension", "lossy"),
         "skill.frontmatter.deprecated": ("missing", "extension", "lossy"),
         "skill.frontmatter.allowed-tools": ("unknown", "specification", "undecidable"),
@@ -146,6 +159,7 @@ def test_a_skill_the_target_reproduces_converts_without_loss(tmp_path: Path) -> 
 
     assert properties(result.report) == {
         "skill.frontmatter.name": ("reproduced", "extension", "clean"),
+        "skill.frontmatter.description": ("reproduced", "extension", "clean"),
         "skill.dir.scripts": ("reproduced", "specification", "clean"),
     }
     assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
@@ -166,6 +180,7 @@ def test_a_property_no_description_declares_is_reported_not_dropped(tmp_path: Pa
 
     assert properties(result.report) == {
         "skill.frontmatter.name": ("reproduced", "extension", "clean"),
+        "skill.frontmatter.description": ("reproduced", "extension", "clean"),
         "skill.frontmatter.telepathy": ("unknown", "extension", "lossy"),
         "skill.dir.sandbox": ("unknown", "extension", "lossy"),
     }
@@ -175,14 +190,32 @@ def test_a_property_no_description_declares_is_reported_not_dropped(tmp_path: Pa
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
 
+def nested(levels: int) -> bytes:
+    """A frontmatter whose one key nests `levels` mappings deep and is valid YAML throughout."""
+    rungs = "".join(f"{'  ' * (level + 1)}k{level}:\n" for level in range(levels))
+    header = (
+        f"name: example\ndescription: what it does\nnest:\n{rungs}{'  ' * (levels + 1)}leaf: x\n"
+    )
+    return f"---\n{header}---\n\nBody.\n".encode()
+
+
 BROKEN: dict[str, bytes | None] = {
     "no-skill-file": None,
     "unclosed-frontmatter": b"---\nname: example\n\nBody, and no closing line.\n",
     "invalid-yaml": b"---\nname: [unclosed\n---\n\nBody.\n",
-    "duplicate-key": b"---\nname: one\nname: two\n---\n\nBody.\n",
-    "byte-order-mark": b"\xef\xbb\xbf---\nname: example\n---\n\nBody.\n",
+    "duplicate-key": b"---\nname: one\nname: two\ndescription: what it does\n---\n\nBody.\n",
+    "byte-order-mark": b"\xef\xbb\xbf---\nname: example\ndescription: d\n---\n\nBody.\n",
+    "no-opening-line": b"name: example\ndescription: what it does\n---\n\nBody.\n",
+    "not-a-mapping": b"---\n- name: example\n- description: what it does\n---\n\nBody.\n",
+    "not-utf-8": b"---\nname: \xff\ndescription: what it does\n---\n\nBody.\n",
+    "anchor-and-alias": b"---\nname: &n example\ndescription: *n\n---\n\nBody.\n",
+    "oversize": b"---\nname: example\ndescription: " + b"x" * 200_000 + b"\n---\n\nBody.\n",
+    "too-deep": nested(40),
+    "no-description": b"---\nname: example\n---\n\nBody.\n",
+    "file-too-large": b"---\nname: example\ndescription: what it does\n---\n\n"
+    + b"x" * 1024 * 1024,
 }
-"""Five ways a skill file is not one. Each must stop the run rather than be read halfway."""
+"""Thirteen ways a skill file is not one. Each must stop the run rather than be read halfway."""
 
 
 @pytest.mark.parametrize("case", sorted(BROKEN))
@@ -192,7 +225,11 @@ def test_a_folder_that_is_not_a_skill_stops_the_run_and_still_reports(
     """Exit code 6, no properties, and a report that names the file it could not read.
 
     A duplicate key is here because PyYAML keeps the last of the two without a word: read
-    and not refused, the frontmatter would convert as a value nobody chose.
+    and not refused, the frontmatter would convert as a value nobody chose. An anchor and
+    its alias are the same defect in another spelling -- what a reader sees in the file and
+    what the parser builds stop being the same text (FR-15). A header without `description`
+    is a missing required field, which FR-16 counts as a structural break and not as an
+    optional field left out; `name` is not in that company, and the test below says so.
     """
     root = four_row_tree(tmp_path)
     folder = tmp_path / "example"
@@ -208,6 +245,26 @@ def test_a_folder_that_is_not_a_skill_stops_the_run_and_still_reports(
     assert result.report["properties"] == []
     assert result.report["report_schema"] == 1
     assert str(folder) in result.report["error"]
+
+
+def test_a_field_the_descriptions_call_optional_is_not_demanded_here(tmp_path: Path) -> None:
+    """A skill file without `name` converts: both environments default it to the folder name.
+
+    Requiring it would be this command inventing a rule about environments it only reads
+    about -- and inventing it in the harshest form there is, a refusal to read the file at
+    all. What a field is worth is written in the descriptions, and `name` says "optional".
+    """
+    root = four_row_tree(tmp_path)
+    folder = tmp_path / "example"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text("---\ndescription: what it does\n---\n\nBody.\n")
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+    assert properties(result.report) == {
+        "skill.frontmatter.description": ("reproduced", "extension", "clean")
+    }
 
 
 @pytest.mark.parametrize(
@@ -242,6 +299,7 @@ def hooks_tree(tmp_path: Path) -> Path:
         environment="claude-code",
         capabilities=[
             {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
             {"id": "skill.frontmatter.hooks", "support": "supported"},
             {"id": "hook.event.PreToolUse", "kind": "hook-event", "support": "supported"},
             {"id": "hook.decision.block", "kind": "hook-decision", "support": "supported"},
@@ -253,6 +311,7 @@ def hooks_tree(tmp_path: Path) -> Path:
         environment="antigravity",
         capabilities=[
             {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
             {"id": "skill.frontmatter.hooks", "support": "supported"},
             {"id": "hook.event.PreToolUse", "kind": "hook-event", "support": "supported"},
         ],
@@ -281,13 +340,53 @@ def test_a_declared_hook_asks_about_the_event_and_about_the_power_to_stop_it(
 
     assert properties(result.report) == {
         "skill.frontmatter.name": ("reproduced", "extension", "clean"),
+        "skill.frontmatter.description": ("reproduced", "extension", "clean"),
         "skill.frontmatter.hooks": ("reproduced", "extension", "clean"),
         "hook.event.PreToolUse": ("reproduced", "extension", "clean"),
         "hook.decision.block": ("unknown", "extension", "lossy"),
     }
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
-    assert len(result.report["advice"]) == 3
-    assert "pre-commit" in " ".join(result.report["advice"])
+    assert len(set(result.report["advice"])) == 3
+
+
+def test_a_hook_no_description_declares_still_earns_the_ways_out(tmp_path: Path) -> None:
+    """The advice follows from the hook in the folder, not from anyone having written it down.
+
+    One folder, one hook, two trees of descriptions: one that mentions hooks and one that
+    has never heard of them. The second holds no entry to read a kind off, and the hook is
+    lost there exactly as it is in the first -- so the ways of keeping the rule are the same
+    ways, word for word. A report that warned about the loss while offering nothing to do
+    about it is a warning nobody can act on.
+    """
+    silent = four_row_tree(tmp_path)
+    documented = hooks_tree(tmp_path / "documented")
+    folder = skill(tmp_path / "example", "name: example\nhooks:\n  Stop:\n    - bye.sh\n")
+
+    unheard_of = convert(folder, SOURCE, TARGET, root=silent, allow_stale=True)
+    written_down = convert(folder, SOURCE, TARGET, root=documented, allow_stale=True)
+
+    assert properties(unheard_of.report)["hook.event.Stop"] == ("unknown", "extension", "lossy")
+    assert unheard_of.report["advice"] == written_down.report["advice"]
+    assert len(set(unheard_of.report["advice"])) == 3
+
+
+def test_the_lost_veto_names_every_hook_it_was_asked_about(tmp_path: Path) -> None:
+    """Two declared events, one row for the power to stop them, and both events named in it.
+
+    `hook.decision.block` is asked once however many hooks the skill declares. Naming the
+    first of them and dropping the rest reads as though only that one loses its veto.
+    """
+    root = hooks_tree(tmp_path)
+    folder = skill(
+        tmp_path / "example",
+        "name: example\nhooks:\n  PreToolUse:\n    - guard.sh\n  Stop:\n    - bye.sh\n",
+    )
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+    found_as = {entry["id"]: entry["found_as"] for entry in result.report["properties"]}
+
+    assert "PreToolUse" in found_as["hook.decision.block"]
+    assert "Stop" in found_as["hook.decision.block"]
 
 
 def assembly_tree(tmp_path: Path) -> Path:
@@ -299,6 +398,7 @@ def assembly_tree(tmp_path: Path) -> Path:
         environment="antigravity",
         capabilities=[
             {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
             {"id": "skill.frontmatter.deprecated", "support": "unsupported"},
         ],
         layout=[
@@ -317,7 +417,9 @@ def test_the_skill_is_assembled_at_the_paths_the_target_description_names(tmp_pa
 
     The expected paths are read off the description written above, not recomputed the way
     the code computes them. A directory the target names no place for is not carried over
-    on a guess -- it keeps its row in the report and stays where it is.
+    on a guess -- it keeps its row in the report, and the report says it was left behind for
+    want of a destination, so that "we had nowhere to put it" cannot be mistaken for "we
+    forgot about it": both look the same in a list of what was written.
     """
     root = assembly_tree(tmp_path)
     folder = skill(tmp_path / "example", "name: example\n", directories=("scripts", "sandbox"))
@@ -335,6 +437,7 @@ def test_the_skill_is_assembled_at_the_paths_the_target_description_names(tmp_pa
     assert carried.read_text(encoding="utf-8") == "echo hi\n"
     assert (out / ".agents/skills/example/SKILL.md").is_file()
     assert not (out / ".agents/skills/example/sandbox").exists()
+    assert any("sandbox/" in line for line in result.report["advice"])
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
 
@@ -459,6 +562,10 @@ def test_a_destination_the_description_puts_outside_out_is_refused(tmp_path: Pat
     `Path(out) / "/somewhere"` is `/somewhere`: joining an absolute path throws the root
     away without a word. A description is data like any other, and the promise that this
     command writes only under `out` cannot rest on every description being well behaved.
+
+    The plan failed the check made before the first byte is written, which is exit code 7 --
+    not code 3. Being unable to write is not a judgement about the skill, so the verdict the
+    table computed stands, exactly as it does when the destination is already occupied.
     """
     root = four_row_tree(tmp_path)
     elsewhere = tmp_path / "elsewhere"
@@ -480,7 +587,7 @@ def test_a_destination_the_description_puts_outside_out_is_refused(tmp_path: Pat
     assert not elsewhere.exists()
     assert result.report["written"] == []
     assert result.report["error"]
-    assert result.exit_code != 0
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 7)
 
 
 def test_a_dangling_link_at_the_destination_is_an_occupied_place(tmp_path: Path) -> None:
@@ -524,7 +631,72 @@ def test_a_file_beside_the_skill_file_gets_a_row_and_is_never_lost_in_silence(
 
     assert properties(result.report) == {
         "skill.frontmatter.name": ("reproduced", "extension", "clean"),
+        "skill.frontmatter.description": ("reproduced", "extension", "clean"),
         "skill.top.README.md": ("unknown", "extension", "lossy"),
     }
     assert rows["skill.top.README.md"]["found_as"] == "top-level file `README.md`"
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+
+
+def cli_arguments(folder: Path, root: Path) -> list[str]:
+    """The one run both command-line tests make, as a list of arguments."""
+    return [
+        "convert",
+        str(folder),
+        "--source",
+        SOURCE,
+        "--target",
+        TARGET,
+        "--specs",
+        str(root),
+        "--allow-stale",
+    ]
+
+
+def test_standard_output_carries_the_json_report_and_nothing_else(tmp_path: Path) -> None:
+    """A caller may pipe this command into a program that reads JSON, and `--report` frees it.
+
+    This is checked through the command line because that is where the two streams exist:
+    the seam returns both reports as values and cannot say which stream either went to. A
+    line of prose printed beside the JSON breaks every caller that parses it, and breaks
+    them silently -- which is why the report and the words for a person are separated here
+    and not left to whoever remembers to redirect.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    arguments = cli_arguments(folder, root)
+
+    piped = runner.invoke(app, arguments)
+    into_file = tmp_path / "report.json"
+    saved = runner.invoke(app, [*arguments, "--report", str(into_file)])
+
+    assert json.loads(piped.stdout)["report_schema"] == 1
+    assert piped.stderr.startswith(str(folder))
+    assert saved.stdout == ""
+    assert json.loads(into_file.read_text(encoding="utf-8")) == json.loads(piped.stdout)
+
+
+def test_a_report_that_cannot_be_written_is_still_issued_and_says_so(tmp_path: Path) -> None:
+    """`--report` into a folder that is not there: the report goes to standard output instead.
+
+    A traceback would leave the command exiting 1, the code for a transfer that lost
+    something -- an answer about the skill, given for a mistake in the arguments. And a run
+    that swallowed the report because the file would not open would be breaking the one
+    promise made about every outcome (FR-26), on the outcome nobody planned for.
+
+    All three places have to agree on the number: what the report says, what the words for a
+    person say, and what the process returns. The verdict is untouched -- the transfer costs
+    what it cost before the report had nowhere to go.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    nowhere = tmp_path / "no-such-folder" / "report.json"
+
+    result = runner.invoke(app, [*cli_arguments(folder, root), "--report", str(nowhere)])
+    issued = json.loads(result.stdout)
+
+    assert result.exit_code == 11
+    assert issued["exit_code"] == 11
+    assert issued["outcome"] == "clean"
+    assert str(nowhere) in issued["error"]
+    assert "(exit 11)" in result.stderr

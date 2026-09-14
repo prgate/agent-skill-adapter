@@ -55,8 +55,31 @@ EXIT_CODE = {Verdict.CLEAN: 0, Verdict.LOSSY: 1, Verdict.UNDECIDABLE: 3}
 UNREADABLE = 6
 """The skill folder could not be read at all, so there was nothing to judge."""
 
+UNWRITABLE = 7
+"""The result did not pass the check made before writing, so nothing was written (FR-37)."""
+
 COLLISION = 8
 """Something is already at a destination this run would have written."""
+
+REPORT_UNWRITABLE = 11
+"""The report was produced and the place named for it would not take it.
+
+FR-27 keeps 11 to 63 for outcomes it has not had to name yet, and this is one of them.
+Code 7 would have said the assembled skill failed the check made before writing, which is
+a different thing and did not happen; the run is otherwise whatever the table decided.
+"""
+
+REFUSAL_VERDICT = {EXIT_CODE[Verdict.UNDECIDABLE]: Verdict.UNDECIDABLE}
+"""Which refusal codes are a verdict as well, written out rather than searched for.
+
+A code answers "what stopped the run", a verdict answers "what does the transfer cost",
+and the two happen to share the number 3: a run that cannot tell which environments it is
+asked about has nothing to say about the skill either. Codes 6, 7 and 8 say the run could
+not read or could not write, which is not a judgement about the skill, and leave the
+verdict the assembly table computed exactly as it is. Reading this backwards out of
+``EXIT_CODE`` would work only for as long as no two verdicts ever share a code, which is
+a property of that table nobody promised.
+"""
 
 UNDECLARED = "no entry with this id in either description"
 """Why a property carries no words from either side: nobody documented it under that id."""
@@ -124,6 +147,35 @@ HOME = "~"
 SKILL_MD = "SKILL.md"
 HOOKS_KEY = "hooks"
 """The file and the frontmatter key of the source environment this command opens by name."""
+
+SKILL_FILE_BYTES = 1024 * 1024
+FRONTMATTER_BYTES = 64 * 1024
+FRONTMATTER_DEPTH = 16
+"""What is read, what a header may weigh, and how deep it may nest before refusal (FR-15).
+
+All three are far above anything a person writes and far below what would cost this command
+its memory or its stack. The first one guards the reading and not the parsing: a file is
+measured before it is opened, or a repository somebody else wrote decides how many bytes
+this command pulls into memory before any limit is consulted.
+
+# ponytail: one number for any skill file, rather than the limit the target environment sets
+# on its own (FR-32 puts that in the `limits` of a description, and FR-33 splits a file that
+# exceeds it). This one is a guard on reading a stranger's repository, not a claim about
+# either environment.
+"""
+
+# ponytail: named here because the format of the descriptions has no field for "this entry
+# is required" -- the word lives in the prose of a `note`. The way up is a flag on
+# `Capability`, after which this list is read off the descriptions rather than written here.
+REQUIRED_FIELDS = ("description",)
+"""The frontmatter keys a skill file must carry, taken from what the descriptions do mark.
+
+The target description calls `description` Required, and so does the open specification the
+source implements; the source environment lets it fall back to the first non-empty line of
+the body, and filling it in from there would be a translation rule (FR-6) this command does
+not have. `name` is not here: both environments say it defaults to the folder name, so a
+file without it is a legal skill file, and refusing it would be a rule of our own invention.
+"""
 
 
 class ConvertError(Exception):
@@ -193,12 +245,36 @@ def worst(verdicts: Iterable[Verdict]) -> Verdict:
     return max(verdicts, key=SEVERITY.index, default=Verdict.CLEAN)
 
 
-class _NoDuplicates(yaml.SafeLoader):
-    """A loader that refuses a mapping declaring the same key twice.
+class _Anchored(Exception):
+    """The header declares a YAML anchor, at the line this carries.
+
+    Its own exception rather than a ``yaml`` one: the header parses, and calling a refusal
+    by rule a syntax error would send a person looking for a typo that is not there.
+    """
+
+    def __init__(self, line: int) -> None:
+        super().__init__(f"line {line}")
+        self.line = line
+
+
+class _StrictLoader(yaml.SafeLoader):
+    """A loader that refuses what a skill header may not contain: a repeated key, an anchor.
 
     PyYAML keeps the last of two equal keys and says nothing, which is how a frontmatter
-    that sets ``model`` twice reaches a converter as one value nobody chose.
+    that sets ``model`` twice reaches a converter as one value nobody chose. An anchor and
+    the alias repeating it are the same defect spelled differently: the text a person reads
+    in the file and the value the parser builds stop being the same thing, and a converter
+    that copied the file over would hand the target environment neither of them (FR-15).
     """
+
+    def compose_node(self, parent: yaml.Node | None, index: int) -> yaml.Node | None:
+        node = super().compose_node(parent, index)
+        # An alias can only repeat an anchor declared before it, so refusing every anchor as
+        # it is registered refuses both -- and refuses them at the place the anchor is written,
+        # which is the place a person has to edit.
+        if self.anchors:
+            raise _Anchored(0 if node is None else node.start_mark.line + 1)
+        return node
 
     def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
         seen: set[Any] = set()
@@ -215,6 +291,24 @@ class _NoDuplicates(yaml.SafeLoader):
         return super().construct_mapping(node, deep=deep)
 
 
+def _depth(value: Any) -> int:
+    """How deeply the loaded frontmatter nests, walked with a stack rather than by recursion.
+
+    The depth is a limit on a file somebody else wrote, and a limit that overflows the
+    interpreter's stack on the very input it guards against is not a limit.
+    """
+    deepest = 0
+    pending: list[tuple[Any, int]] = [(value, 1)]
+    while pending:
+        item, level = pending.pop()
+        deepest = max(deepest, level)
+        if isinstance(item, Mapping):
+            pending += [(nested, level + 1) for nested in item.values()]
+        elif isinstance(item, list):
+            pending += [(nested, level + 1) for nested in item]
+    return deepest
+
+
 def _frontmatter(path: Path) -> dict[str, Any]:
     """The frontmatter of ``path``, or a refusal naming what is wrong and where.
 
@@ -223,6 +317,14 @@ def _frontmatter(path: Path) -> dict[str, Any]:
     """
     if not path.is_file():
         raise ConvertError(f"{path}: no SKILL.md here, so this is not a skill folder", UNREADABLE)
+    size = path.stat().st_size
+    if size > SKILL_FILE_BYTES:
+        raise ConvertError(
+            f"{path}: the file is {size} bytes, past the {SKILL_FILE_BYTES} this command "
+            "will read; a skill file that size is not one, and reading it to find out would "
+            "be letting the folder decide how much memory the run takes",
+            UNREADABLE,
+        )
     raw = path.read_bytes()
     if raw.startswith(codecs.BOM_UTF8):
         raise ConvertError(
@@ -244,9 +346,27 @@ def _frontmatter(path: Path) -> dict[str, Any]:
             f"{path}: the frontmatter opened on line 1 is never closed by a `---` line",
             UNREADABLE,
         )
+    header = text[3:end]
+    if len(header.encode("utf-8")) > FRONTMATTER_BYTES:
+        raise ConvertError(
+            f"{path}: the frontmatter is longer than {FRONTMATTER_BYTES} bytes, which is "
+            "not a header any more; what belongs in the body of the skill goes below the "
+            "closing `---` line",
+            UNREADABLE,
+        )
     try:
-        loaded = yaml.load(text[3:end], _NoDuplicates)
-    except yaml.YAMLError as error:
+        # A header nested past what the parser itself can carry arrives as a `RecursionError`,
+        # which is the depth limit being hit before this function gets to apply its own.
+        loaded = yaml.load(header, _StrictLoader)
+    except _Anchored as error:
+        raise ConvertError(
+            f"{path}: the frontmatter declares a YAML anchor on line {error.line}. Anchors "
+            "and the aliases repeating them are valid YAML and are refused here all the "
+            "same (FR-15): the text a person reads in the file and the value the parser "
+            "builds stop being the same thing, and this command cannot carry both across",
+            UNREADABLE,
+        ) from error
+    except (yaml.YAMLError, RecursionError) as error:
         raise ConvertError(
             f"{path}: the frontmatter is not valid YAML ({error})", UNREADABLE
         ) from error
@@ -254,6 +374,22 @@ def _frontmatter(path: Path) -> dict[str, Any]:
         raise ConvertError(
             f"{path}: the frontmatter is not a mapping of keys "
             f"(it reads as {type(loaded).__name__})",
+            UNREADABLE,
+        )
+    if _depth(loaded) > FRONTMATTER_DEPTH:
+        raise ConvertError(
+            f"{path}: the frontmatter nests deeper than {FRONTMATTER_DEPTH} levels; a skill "
+            "header that deep is a data file, and reading one is not what this command does",
+            UNREADABLE,
+        )
+    missing = [key for key in REQUIRED_FIELDS if key not in loaded]
+    if missing:
+        raise ConvertError(
+            f"{path}: the frontmatter declares no "
+            + " and no ".join(f"`{key}`" for key in missing)
+            + "; the description of the target environment marks the field required, so "
+            "there is nothing here that could be assembled for it, and a value invented "
+            "for the field would be this command writing the skill rather than moving it",
             UNREADABLE,
         )
     return loaded
@@ -301,6 +437,20 @@ def _findings(skill_dir: Path) -> tuple[list[Finding], dict[str, Any]]:
     return findings, front
 
 
+def _kind(entry_id: str, gap: Gap | None) -> str:
+    """What kind of entry an id names: the comparison's word for it, or the id's own shape.
+
+    A hook event nobody wrote down carries no ``Gap`` to read a kind off, and it is exactly
+    then that the ways of keeping the rule are worth printing. The ways out are earned by
+    what the skill folder holds, not by whether a description happens to mention it.
+    """
+    if gap is not None:
+        return gap.kind
+    if entry_id == BLOCK:
+        return "hook-decision"
+    return "hook-event" if entry_id.startswith(EVENT) else ""
+
+
 def _judge(
     findings: Sequence[Finding], gaps: Mapping[str, Gap]
 ) -> tuple[list[Property], list[str]]:
@@ -310,33 +460,37 @@ def _judge(
     description never declared it, so no open format ever promised it either, and nothing
     is known about what the target does with it. It still gets a row -- a property that
     fell out of the report silently is the one failure this command cannot be trusted after.
+
+    One id, one row, however many findings asked about it: ``hook.decision.block`` is asked
+    once by every declared hook, and the row names all of them. Naming the first and dropping
+    the rest would read as though only that hook lost its veto.
     """
-    properties: list[Property] = []
-    advice: list[str] = []
-    seen: set[str] = set()
+    asked_by: dict[str, list[str]] = {}
     for finding in findings:
         for entry_id in finding.ids:
-            if entry_id in seen:
-                continue
-            seen.add(entry_id)
-            gap = gaps.get(entry_id)
-            outcome = gap.outcome if gap is not None else Outcome.UNKNOWN
-            origin = gap.origin if gap is not None else Origin.EXTENSION
-            verdict = verdict_of(outcome, origin)
-            properties.append(
-                Property(
-                    id=entry_id,
-                    found_as=finding.found_as,
-                    outcome=outcome,
-                    origin=origin,
-                    verdict=verdict,
-                    source_says=gap.source_note if gap is not None else None,
-                    target_says=gap.target_note if gap is not None else None,
-                    note=None if gap is not None else UNDECLARED,
-                )
+            asked_by.setdefault(entry_id, []).append(finding.found_as)
+    properties: list[Property] = []
+    advice: list[str] = []
+    for entry_id, found_as in asked_by.items():
+        gap = gaps.get(entry_id)
+        outcome = gap.outcome if gap is not None else Outcome.UNKNOWN
+        origin = gap.origin if gap is not None else Origin.EXTENSION
+        verdict = verdict_of(outcome, origin)
+        properties.append(
+            Property(
+                id=entry_id,
+                found_as=", ".join(found_as),
+                outcome=outcome,
+                origin=origin,
+                verdict=verdict,
+                source_says=gap.source_note if gap is not None else None,
+                target_says=gap.target_note if gap is not None else None,
+                note=None if gap is not None else UNDECLARED,
             )
-            if gap is not None and verdict is not Verdict.CLEAN:
-                advice += [line for line in WORKAROUNDS.get(gap.kind, ()) if line not in advice]
+        )
+        if verdict is not Verdict.CLEAN:
+            ways_out = WORKAROUNDS.get(_kind(entry_id, gap), ())
+            advice += [line for line in ways_out if line not in advice]
     return properties, advice
 
 
@@ -408,19 +562,30 @@ def _plan(
         if entry.id.startswith(DIRECTORY)
     ]
     parts = []
+    homeless = []
     for entry_id, label in wanted:
         inside = _layout(target, entry_id)
         if inside is None:
+            homeless.append(label)
             continue
         destination, staged = _destination(f"{root.rstrip('/')}/{inside}", skill_dir.name)
         parts.append(_Part(label, destination, out / staged, copied_from=skill_dir / label))
+    # Said out loud, because the list of what was written cannot say it: a part missing from
+    # it looks the same whether the run had nowhere to put it or never got that far.
+    asked = [
+        f"`{label}` stayed in the skill folder: {target.vendor}/{target.environment} names "
+        "no place for it, and a place picked for it here would be a guess about a layout "
+        "only that environment's documentation can settle"
+        for label in homeless
+    ]
     hook_part = _hook_part(out, target, scope, properties, hooks)
     if hook_part is None:
-        return parts, []
+        return parts, asked
     return parts + [hook_part], [
+        *asked,
         f"the hook entry is staged at {hook_part.staged} and not merged into "
         f"{hook_part.destination}: that file belongs to the whole target environment and may "
-        "already hold entries of its own, so add this one to it yourself"
+        "already hold entries of its own, so add this one to it yourself",
     ]
 
 
@@ -484,7 +649,11 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
             ", ".join(outside) + f" is not under {out}; nothing was written, because the one "
             "promise this command makes about the caller's filesystem is that it writes "
             "under the folder the caller named and nowhere else",
-            EXIT_CODE[Verdict.UNDECIDABLE],
+            # The plan failed the check made before writing, which is its own outcome
+            # (FR-37) and not a verdict: like an occupied destination, being unable to write
+            # says nothing about what the skill costs to transfer. Exit code 3 here would
+            # overwrite the answer the assembly table had already computed.
+            UNWRITABLE,
         )
     for part in parts:
         part.staged.parent.mkdir(parents=True, exist_ok=True)
@@ -612,6 +781,21 @@ def _summary(report: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def refused(result: Conversion, exit_code: int, message: str) -> Conversion:
+    """The same run, ending in something that went wrong after it: the report says what.
+
+    Whatever happens to a conversion once it is computed -- a report that could not be put
+    where it was asked for, and in time whatever else -- the answer a caller reads has to
+    agree with itself. The code in the report, the code in the words for a person and the
+    code the process exits with are one number, or the two streams describe different runs.
+    The verdict is untouched: it is what the transfer costs, and that did not change.
+    """
+    report = dict(result.report)
+    report["exit_code"] = exit_code
+    report["error"] = f"{report['error']}; {message}" if report["error"] else message
+    return Conversion(result.verdict, exit_code, report, _summary(report))
+
+
 def convert(
     skill_dir: str | Path,
     source: str | None,
@@ -664,11 +848,9 @@ def convert(
             advice += asked
     except ConvertError as error:
         # A refusal that exits with one of the table's own codes is that verdict: not
-        # knowing where the skill goes is not knowing what the transfer amounts to. Codes 6
-        # and 8 are not verdicts, and leave the one the table computed as it is.
-        verdict = next(
-            (name for name, code in EXIT_CODE.items() if code == error.exit_code), verdict
-        )
+        # knowing where the skill goes is not knowing what the transfer amounts to. Which
+        # codes those are is `REFUSAL_VERDICT`, and the rest leave the computed one alone.
+        verdict = REFUSAL_VERDICT.get(error.exit_code, verdict)
         report = _report(
             skill_dir,
             source,
