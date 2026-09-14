@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -204,6 +205,12 @@ BROKEN: dict[str, bytes | None] = {
     "unclosed-frontmatter": b"---\nname: example\n\nBody, and no closing line.\n",
     "invalid-yaml": b"---\nname: [unclosed\n---\n\nBody.\n",
     "duplicate-key": b"---\nname: one\nname: two\ndescription: what it does\n---\n\nBody.\n",
+    "unhashable-key": b"---\ndescription: what it does\n? [a, b]\n: v\n---\n\nBody.\n",
+    "unstable-set": b"---\ndescription: what it does\nhooks: !!set {alpha, beta}\n---\n\nBody.\n",
+    "unstable-bytes": b"---\ndescription: what it does\nseed: !!binary aGk=\n---\n\nBody.\n",
+    "nonfinite-nan": b"---\ndescription: what it does\nweight: .nan\n---\n\nBody.\n",
+    "nonfinite-infinity": b"---\ndescription: what it does\nweight: .inf\n---\n\nBody.\n",
+    "nonfinite-negative-infinity": b"---\ndescription: what it does\nweight: -.inf\n---\n\nBody.\n",
     "byte-order-mark": b"\xef\xbb\xbf---\nname: example\ndescription: d\n---\n\nBody.\n",
     "no-opening-line": b"name: example\ndescription: what it does\n---\n\nBody.\n",
     "not-a-mapping": b"---\n- name: example\n- description: what it does\n---\n\nBody.\n",
@@ -215,7 +222,15 @@ BROKEN: dict[str, bytes | None] = {
     "file-too-large": b"---\nname: example\ndescription: what it does\n---\n\n"
     + b"x" * 1024 * 1024,
 }
-"""Thirteen ways a skill file is not one. Each must stop the run rather than be read halfway."""
+"""Nineteen ways a skill file is not one. Each must stop the run rather than be read halfway.
+
+A set and a block of bytes are here because neither has a text it always reads back as: the
+same header would put different bytes in the assembled file on every run, and a converter
+whose output moves on a fixed input cannot be checked against anything. `.nan`, `.inf` and
+`-.inf` are here for the other half of the same rule: JSON has no such number, and
+`json.dumps` writes them as a bare `NaN` or `Infinity` that a strict reader refuses -- the
+file would leave here looking assembled and arrive as something the target cannot load.
+"""
 
 
 @pytest.mark.parametrize("case", sorted(BROKEN))
@@ -245,6 +260,48 @@ def test_a_folder_that_is_not_a_skill_stops_the_run_and_still_reports(
     assert result.report["properties"] == []
     assert result.report["report_schema"] == 1
     assert str(folder) in result.report["error"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 000 does not stop root from reading")
+def test_a_skill_file_the_filesystem_refuses_to_open_stops_the_run_the_same_way(
+    tmp_path: Path,
+) -> None:
+    """A `SKILL.md` nobody may read is a folder that could not be read: code 6 and a report.
+
+    The refusal arrives as a `PermissionError` rather than as anything this module raises,
+    and the answer a caller gets must not depend on that: a traceback would exit 1, the code
+    that says the skill transferred with known losses.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    (folder / "SKILL.md").chmod(0o000)
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert (result.verdict, result.exit_code) == (Verdict.UNDECIDABLE, 6)
+    assert result.report["properties"] == []
+    assert str(folder) in result.report["error"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 000 does not stop root from reading")
+def test_a_description_that_cannot_be_read_is_blamed_on_the_description(tmp_path: Path) -> None:
+    """A description nobody may read: exit code 3, and the file named is the one that failed.
+
+    The side that failed decides both. Naming the skill folder would send a person to look
+    for a fault in their own skill, and code 6 would tell them the folder is not a skill
+    folder -- while what could not be read is a file of this repository. Every other way of
+    not knowing what the two environments say is code 3, and this is one more of them.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    shut = root / "google" / "antigravity.yaml"
+    shut.chmod(0o000)
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert (result.verdict, result.exit_code) == (Verdict.UNDECIDABLE, 3)
+    assert str(shut) in result.report["error"]
+    assert result.report["properties"] == []
 
 
 def test_a_field_the_descriptions_call_optional_is_not_demanded_here(tmp_path: Path) -> None:
@@ -479,6 +536,36 @@ def test_an_occupied_destination_stops_the_assembly_and_keeps_what_is_there(
     assert result.report["error"]
 
 
+def test_a_copy_that_fails_part_way_leaves_no_half_assembled_skill(tmp_path: Path) -> None:
+    """A link to nothing inside a bundle: exit code 7, a report, and an empty `--out`.
+
+    `shutil` refuses to copy a link whose target is not there, and the refusal is an
+    operating system error like any other -- reaching the caller as a traceback it would
+    exit 1, the code for a transfer that lost something, on a run that transferred nothing.
+    The skill file was copied before the bundle failed, and it is taken back: half an
+    assembled skill on disk is indistinguishable from a whole one.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n", directories=("scripts",))
+    (folder / "scripts" / "dangling").symlink_to(tmp_path / "nowhere")
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assert result.exit_code == 7
+    assert result.report["written"] == []
+    assert result.report["error"]
+    # What is left, and not merely what is not: the empty skeleton of the destination and
+    # nothing else -- no file, and no link pointing at one. A run that left the copied
+    # `SKILL.md`, or the half-copied bundle with its dangling link in it, would pass a test
+    # that only counted files it could open.
+    assert sorted(entry.relative_to(out).as_posix() for entry in out.rglob("*")) == [
+        ".agents",
+        ".agents/skills",
+        ".agents/skills/example",
+    ]
+
+
 def test_a_run_that_could_not_be_decided_assembles_nothing(tmp_path: Path) -> None:
     """`allowed-tools` is a field of the open format the target is silent about: no transfer.
 
@@ -533,6 +620,31 @@ def test_only_a_hook_the_target_fires_is_staged_and_the_report_says_where_it_bel
         "path": str(staged),
     } in result.report["written"]
     assert any(".agents/hooks.json" in line for line in result.report["advice"])
+
+
+def test_a_date_in_the_header_is_staged_as_the_text_iso_8601_spells(tmp_path: Path) -> None:
+    """Two unquoted timestamps reach the staged entry as the text they were written as.
+
+    An unquoted date is ordinary YAML and an ordinary thing to write in a header, and PyYAML
+    hands it over as a `date` -- which JSON has no type for. Left to `json.dumps` it is a
+    `TypeError` past every handler: no report and exit code 1, the code that says the skill
+    transferred with known losses. Written out by `str()` instead, the `T` a person typed
+    comes back a space, so the expected text below is the text of the file and not what
+    printing the value happens to give.
+    """
+    root = hooks_tree(tmp_path)
+    folder = skill(
+        tmp_path / "example",
+        "name: example\nhooks:\n  PreToolUse:\n    - 2026-09-14\n    - 2026-09-14T10:00:00+03:00\n",
+    )
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assert json.loads((out / "hooks.json").read_text(encoding="utf-8")) == {
+        "hooks": {"PreToolUse": ["2026-09-14", "2026-09-14T10:00:00+03:00"]}
+    }
+    assert result.exit_code == 1
 
 
 def test_the_user_level_destination_is_the_home_folder_and_the_bytes_stay_under_out(
@@ -643,7 +755,53 @@ def test_a_file_beside_the_skill_file_gets_a_row_and_is_never_lost_in_silence(
         "skill.top.README.md": ("unknown", "extension", "lossy"),
     }
     assert rows["skill.top.README.md"]["found_as"] == "top-level file `README.md`"
+    assert any("README.md" in line for line in result.report["advice"])
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+
+
+def test_the_plain_values_of_a_header_cross_as_themselves(tmp_path: Path) -> None:
+    """Refusing `.nan` narrows to three values: a fraction, a whole number and `on` cross.
+
+    JSON holds all three, and this is the line the narrowing is drawn against: one type too
+    wide and every skill that puts a number in a hook is refused, by a refusal that looks
+    exactly like the one that belongs there. `on` is YAML's own spelling of true and crosses
+    as `true`, which is the branch the narrowing split -- a `bool` is an `int` in Python and
+    would leave as `1` if it were ever carried by the number half.
+    """
+    root = hooks_tree(tmp_path)
+    folder = skill(
+        tmp_path / "example", "name: example\nhooks:\n  PreToolUse:\n    - 1.5\n    - 3\n    - on\n"
+    )
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+    carried = json.loads((out / "hooks.json").read_text(encoding="utf-8"))["hooks"]["PreToolUse"]
+
+    assert carried == [1.5, 3, True]
+    # `3 == 3.0` and `True == 1`, so the line above holds even if the shapes were lost on the
+    # way. The types are what says the file carries `3` and `true` rather than `3.0` and `1`,
+    # and a file that says `1` where it said `true` is a different file to whatever reads it.
+    assert [type(item) for item in carried] == [float, int, bool]
+    assert result.exit_code == 1
+
+
+def test_a_rewritten_header_value_is_named_in_the_report(tmp_path: Path) -> None:
+    """The report says which value changed shape, what it was, and what it became.
+
+    No `--out` here: the rewrite happened while the header was read, and a person has to be
+    able to see it whether or not a file was written afterwards. Unsaid, the only trace of
+    a value entering as a date and leaving as text would be the text itself -- and the exit
+    code of such a run stands for something else entirely.
+    """
+    root = four_row_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\nmodel: 2026-09-14\n")
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+    said = [line for line in result.report["advice"] if "frontmatter.model" in line]
+
+    assert len(said) == 1
+    assert "date" in said[0]
+    assert "2026-09-14" in said[0]
 
 
 def cli_arguments(folder: Path, root: Path) -> list[str]:
@@ -678,6 +836,7 @@ def test_standard_output_carries_the_json_report_and_nothing_else(tmp_path: Path
     into_file = tmp_path / "report.json"
     saved = runner.invoke(app, [*arguments, "--report", str(into_file)])
 
+    assert (piped.exit_code, saved.exit_code) == (0, 0)
     assert json.loads(piped.stdout)["report_schema"] == 1
     assert piped.stderr.startswith(str(folder))
     assert saved.stdout == ""

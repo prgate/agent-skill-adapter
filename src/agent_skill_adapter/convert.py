@@ -19,7 +19,9 @@ import json
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +58,15 @@ UNREADABLE = 6
 """The skill folder could not be read at all, so there was nothing to judge."""
 
 UNWRITABLE = 7
-"""The result did not pass the check made before writing, so nothing was written (FR-37)."""
+"""The result could not be written under ``out``, and no file of it was left there.
+
+Either the plan failed the check made before the first byte (FR-37), so the writing never
+began, or the writing itself was refused part way and every file it had put there was taken
+back. What may remain is the empty skeleton of folders made on the way to a destination:
+`mkdir` does not say whether a folder was already there, and removing one this run did not
+create would be the damage this code exists to prevent. Nothing readable is left, so half a
+skill cannot be mistaken for a whole one, which is what the taking back is for.
+"""
 
 COLLISION = 8
 """Something is already at a destination this run would have written."""
@@ -88,6 +98,22 @@ not read or could not write, which is not a judgement about the skill, and leave
 verdict the assembly table computed exactly as it is. Reading this backwards out of
 ``EXIT_CODE`` would work only for as long as no two verdicts ever share a code, which is
 a property of that table nobody promised.
+"""
+
+UNHOLDABLE = "JSON has no way to hold it, and no text it is always written as"
+NO_TEXT_FOR = {
+    "float": "JSON has no `nan` and no infinity: `json.dumps` spells them `NaN` and "
+    "`Infinity`, which is Python's own extension to the format and not a number a strict "
+    "reader will accept",
+    "set": "a set has no order, so the same header would put different bytes in the "
+    "assembled file on the next run",
+    "bytes": "bytes have no spelling of their own, and the nearest thing to one is a Python "
+    "repr handed to whatever reads the file next",
+}
+"""Why a shape YAML carries and JSON does not is refused -- one reason each, the one that fired.
+
+Printing all of them would have a person holding a `!!binary` read about the order of sets.
+The module answers this way throughout: the anchor names its line, the size limit its number.
 """
 
 UNDECLARED = "no entry with this id in either description"
@@ -301,6 +327,11 @@ class _StrictLoader(yaml.SafeLoader):
         return node
 
     def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        # The parser goes first. A key YAML allows and a mapping cannot hold -- `? [a, b]`
+        # builds a list -- is refused there, as the `ConstructorError` every other structural
+        # break arrives as; asked about before that, it is a key that cannot go into a set,
+        # and the answer to the caller would be a traceback rather than a report.
+        mapping = super().construct_mapping(node, deep=deep)
         seen: set[Any] = set()
         for key_node, _ in node.value:
             key = self.construct_object(key_node, deep=deep)
@@ -312,7 +343,7 @@ class _StrictLoader(yaml.SafeLoader):
                     key_node.start_mark,
                 )
             seen.add(key)
-        return super().construct_mapping(node, deep=deep)
+        return mapping
 
 
 def _depth(value: Any) -> int:
@@ -333,8 +364,66 @@ def _depth(value: Any) -> int:
     return deepest
 
 
-def _frontmatter(path: Path) -> dict[str, Any]:
-    """The frontmatter of ``path``, or a refusal naming what is wrong and where.
+def _portable(value: Any, where: str, path: Path, rewritten: list[str]) -> Any:
+    """``value`` as something JSON holds, and a line for every value that had to change.
+
+    YAML carries shapes JSON does not, and they fall in two halves. A date and a timestamp
+    have one text they are always written as -- the one ISO 8601 spells -- so they cross as
+    that text, and the line this appends is how a reader learns that they did. A set has no
+    order and bytes have no spelling: there is no text they read back as, and the nearest
+    thing to one comes out differently on every run, which would put different bytes in the
+    assembled file on the same skill. Those are refused, where every other header this
+    command cannot carry across is refused.
+
+    Keys go through this too, and not because they might be dates: JSON has no key but a
+    string, and `json.dumps` refuses a date one whatever is done about its values.
+    """
+    if isinstance(value, Mapping):
+        return {
+            _portable(key, f"{where}.{key}", path, rewritten): _portable(
+                item, f"{where}.{key}", path, rewritten
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _portable(item, f"{where}[{index}]", path, rewritten)
+            for index, item in enumerate(value)
+        ]
+    # `datetime` is a `date`, and both answer `isoformat`. A `bool` is an `int` and neither
+    # is touched: JSON holds them as they are, and `true` is what `true` was written as.
+    if isinstance(value, date):
+        text = value.isoformat()
+        rewritten.append(
+            f"`{where}` was written as a {type(value).__name__} and is carried as the text "
+            f"`{text}`: YAML has a date and JSON has none, so that text is what any file "
+            "this run writes puts there, and what the target environment will read"
+        )
+        return text
+    if value is None or isinstance(value, (str, int)):
+        return value
+    # A float JSON holds is a finite one. `nan` and the two infinities leave `json.dumps` as
+    # a bare `NaN` or `Infinity` -- Python's own extension to the format, which a strict
+    # reader refuses -- so the file would leave here looking assembled and arrive unreadable.
+    # They belong with the set and the bytes below, and they get past a check written against
+    # exactly them only because asking the type is not asking whether the value can be
+    # written down.
+    if isinstance(value, float) and isfinite(value):
+        return value
+    # Named by what it reads as, not by its type, where the two differ: every number JSON
+    # holds is a float too, so "reads as a float" would send a person to the wrong line.
+    form = repr(value) if isinstance(value, float) else type(value).__name__
+    raise ConvertError(
+        f"{path}: `{where}` reads as `{form}`, and "
+        + NO_TEXT_FOR.get(type(value).__name__, UNHOLDABLE)
+        + "; quote the value to move it across as text",
+        UNREADABLE,
+    )
+
+
+def _frontmatter(path: Path) -> tuple[dict[str, Any], list[str]]:
+    """The frontmatter of ``path`` as JSON holds it, the lines its rewrites owe the report,
+    or a refusal naming what is wrong and where.
 
     Every refusal here is structural: the file is not the shape a skill file has, so no
     part of it can be trusted to mean what it appears to mean.
@@ -416,10 +505,12 @@ def _frontmatter(path: Path) -> dict[str, Any]:
             "for the field would be this command writing the skill rather than moving it",
             UNREADABLE,
         )
-    return loaded
+    rewritten: list[str] = []
+    carried: dict[str, Any] = _portable(loaded, "frontmatter", path, rewritten)
+    return carried, rewritten
 
 
-def _findings(skill_dir: Path) -> tuple[list[Finding], dict[str, Any]]:
+def _findings(skill_dir: Path) -> tuple[list[Finding], dict[str, Any], list[str]]:
     """Everything the folder holds that an environment has to reproduce, in the order found.
 
     Ids are built from the names as written -- ``skill.frontmatter.<key>``,
@@ -430,7 +521,7 @@ def _findings(skill_dir: Path) -> tuple[list[Finding], dict[str, Any]]:
     """
     if not skill_dir.is_dir():
         raise ConvertError(f"{skill_dir}: no such folder", UNREADABLE)
-    front = _frontmatter(skill_dir / SKILL_MD)
+    front, rewritten = _frontmatter(skill_dir / SKILL_MD)
     findings = [Finding(f"frontmatter key `{key}`", (f"skill.frontmatter.{key}",)) for key in front]
     held = sorted(skill_dir.iterdir())
     findings += [
@@ -458,7 +549,7 @@ def _findings(skill_dir: Path) -> tuple[list[Finding], dict[str, Any]]:
         )
         for event in events
     ]
-    return findings, front
+    return findings, front, rewritten
 
 
 def _kind(entry_id: str, gap: Gap | None) -> str:
@@ -585,6 +676,10 @@ def _plan(
         for entry in properties
         if entry.id.startswith(DIRECTORY)
     ]
+    # A file beside the skill file is asked about exactly as a bundled directory is. Left out
+    # of this list it would be left out of the line below as well, and a `README.md` nobody
+    # has a place for would go unmentioned while a directory in the same position is named.
+    wanted += [(entry.id, entry.id[len(TOP) :]) for entry in properties if entry.id.startswith(TOP)]
     parts = []
     homeless = []
     for entry_id, label in wanted:
@@ -637,6 +732,11 @@ def _hook_part(
         # file it belongs in, never at the destination itself: merging into a file that may
         # already hold someone else's entries is FR-40.
         out / Path(destination).name,
+        # No rescue argument here, and none needed: every value came through `_portable`,
+        # which is where a header meets JSON. A date is already the text ISO 8601 spells,
+        # and a shape with no stable text never got this far -- the file was refused as it
+        # was read. A rescue here would have turned an unwritable value into whatever
+        # `str()` makes of it, unannounced and differently on every run.
         content=json.dumps({HOOKS_KEY: carried}, indent=2, ensure_ascii=False) + "\n",
     )
 
@@ -679,14 +779,35 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
             # overwrite the answer the assembly table had already computed.
             UNWRITABLE,
         )
-    for part in parts:
-        part.staged.parent.mkdir(parents=True, exist_ok=True)
-        if part.content is not None:
-            part.staged.write_text(part.content, encoding="utf-8")
-        elif part.copied_from is not None and part.copied_from.is_dir():
-            shutil.copytree(part.copied_from, part.staged)
-        elif part.copied_from is not None:
-            shutil.copy2(part.copied_from, part.staged)
+    started: list[_Part] = []
+    try:
+        for part in parts:
+            part.staged.parent.mkdir(parents=True, exist_ok=True)
+            started.append(part)
+            if part.content is not None:
+                part.staged.write_text(part.content, encoding="utf-8")
+            elif part.copied_from is not None and part.copied_from.is_dir():
+                shutil.copytree(part.copied_from, part.staged)
+            elif part.copied_from is not None:
+                shutil.copy2(part.copied_from, part.staged)
+    except OSError as error:
+        # Whatever the filesystem refused -- a link pointing nowhere inside a bundle, a full
+        # disk -- this run takes back what it had put there, because half an assembled skill
+        # is indistinguishable from a whole one. Only what it wrote: every one of these
+        # places was free, which is what the check above established.
+        for part in started:
+            if part.staged.is_dir() and not part.staged.is_symlink():
+                shutil.rmtree(part.staged, ignore_errors=True)
+            else:
+                part.staged.unlink(missing_ok=True)
+        raise ConvertError(
+            f"nothing was assembled under {out}, and what this run had written there is "
+            f"taken back: {error}",
+            # The same code as a destination outside `out`, and for the same reason: we could
+            # not write. FR-27 has one row for that side of the run, and what the skill costs
+            # to transfer was decided before any of it was written.
+            UNWRITABLE,
+        ) from error
     return [
         {"from": part.label, "to": part.destination, "path": str(part.staged)} for part in parts
     ]
@@ -851,10 +972,19 @@ def convert(
     # verdict stands even if the run then fails to write: being unable to put the files
     # somewhere is not a judgement about what the skill loses in the transfer.
     verdict = Verdict.UNDECIDABLE
+    # Which side of the run an operating system error came from, and so which code answers
+    # for it: while the descriptions are being read it is code 3, like every other way of not
+    # knowing what the two environments say; from there on it is the skill folder, code 6.
+    # The writing side names its own code where it writes, so it never arrives here as one.
+    side = EXIT_CODE[Verdict.UNDECIDABLE]
     try:
         gaps, target_spec = _gaps(root, source, target, allow_stale)
-        findings, front = _findings(skill_dir)
+        side = UNREADABLE
+        findings, front, rewritten = _findings(skill_dir)
         properties, advice = _judge(findings, gaps)
+        # First, because they happened first: a value was rewritten while the header was
+        # being read, before anything was judged about it.
+        advice = [*rewritten, *advice]
         verdict = worst(entry.verdict for entry in properties)
         # An undecidable run assembles nothing: the transferable half of a skill whose other
         # half nobody documented is a folder that looks converted and is not.
@@ -870,23 +1000,35 @@ def convert(
             )
             written = _assemble(Path(out), parts)
             advice += asked
-    except ConvertError as error:
+    except (ConvertError, OSError) as error:
+        # Two shapes of refusal and one answer: what this module raised and what the
+        # filesystem raised both leave as a report and a code, so that reading the answer
+        # never costs a caller knowing which exceptions live in here.
+        if isinstance(error, ConvertError):
+            stopped = error
+        else:
+            # Named by the error and not by the argument: a description of this repository
+            # that would not open is not the caller's skill folder, and saying it was sends
+            # a person to read the wrong file for a fault that is not in it.
+            stopped = ConvertError(
+                f"{error.filename or skill_dir}: could not be read ({error})", side
+            )
         # A refusal that exits with one of the table's own codes is that verdict: not
         # knowing where the skill goes is not knowing what the transfer amounts to. Which
         # codes those are is `REFUSAL_VERDICT`, and the rest leave the computed one alone.
-        verdict = REFUSAL_VERDICT.get(error.exit_code, verdict)
+        verdict = REFUSAL_VERDICT.get(stopped.exit_code, verdict)
         report = _report(
             skill_dir,
             source,
             target,
             verdict,
-            error.exit_code,
+            stopped.exit_code,
             properties,
             advice,
             written,
-            str(error),
+            str(stopped),
         )
-        return Conversion(verdict, error.exit_code, report, _summary(report))
+        return Conversion(verdict, stopped.exit_code, report, _summary(report))
     report = _report(
         skill_dir, source, target, verdict, EXIT_CODE[verdict], properties, advice, written, None
     )
