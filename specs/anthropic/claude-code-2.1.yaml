@@ -342,7 +342,7 @@ capabilities:
     kind: hook-event
     support: supported
     source_id: hooks-lifecycle
-    note: "before a tool call executes; can block it"
+    note: "before a tool call executes; the power to block it is the entry `hook.decision.block`"
   - id: hook.event.PermissionRequest
     kind: hook-event
     support: supported
@@ -483,6 +483,16 @@ capabilities:
     support: supported
     source_id: hooks-lifecycle
     note: "when a session terminates"
+
+  # What a hook may decide, kept apart from the events above. The lifecycle table states
+  # two different things about PreToolUse: when it fires, and that a hook of it can stop
+  # the tool call. Held in one entry, the event's `supported` would answer for both, and a
+  # target that fires the event without honouring the veto would read as reproducing it.
+  - id: hook.decision.block
+    kind: hook-decision
+    support: supported
+    source_id: hooks-lifecycle
+    note: "a hook can block what the event precedes: the tool call, or the expansion"
 
   # Settings files that carry configuration a transfer has to account for.
   - id: settings.file.user

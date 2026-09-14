@@ -72,7 +72,15 @@ class Source(_Identified):
 class Capability(_Entry):
     """One documented property of the environment."""
 
-    kind: Literal["skill-field", "subagent-field", "hook-event", "settings-file"]
+    kind: Literal["skill-field", "subagent-field", "hook-event", "hook-decision", "settings-file"]
+    """What the entry is about.
+
+    ``hook-event`` is that the environment fires an event; ``hook-decision`` is what a hook
+    of it may decide -- to stop what is about to happen, say. They are two entries because
+    they are two claims: an environment can fire an event it lets no hook veto, and one
+    entry answering for both would let a lost veto pass for a reproduced one.
+    """
+
     support: Support
     since_version: str | None = None
     note: str | None = None
