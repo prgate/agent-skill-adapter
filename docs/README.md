@@ -11,7 +11,8 @@ Welcome to the **Agent Skill Adapter** documentation hub.
 - [ADR Index](adr/) — Architectural design decisions and rationale tracked using the MADR (Markdown Any Decision Records) v3.0 standard.
 
 ## 🧭 Repository Navigation
-- [Project Readme](../README.md) — Quickstart, installation, and developer commands.
+- [Project Readme](../README.md) — что делает адаптер, схема работы и быстрый старт.
+  Английская версия — [README.en.md](../README.en.md).
 - `specs/` — Provider capability definitions and schemas.
 - `contracts/` — Cross-provider conversion contracts and lowering rules.
 - `examples/` — Reference input and output skill structures.
