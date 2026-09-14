@@ -9,7 +9,7 @@ window.STATE =
   "tier": "T2",
   "briefFile": "2026-09-14-brief.md",
   "memoryFile": "AGENTS.md",
-  "skillDir": "/Users/kksudo/.agents/skills/autopilot",
+  "skillDir": "~/.agents/skills/autopilot",
   "startedAt": "2026-09-14T00:07:56+04:00",
   "updatedAt": "2026-09-14T01:11:08+04:00",
   "finishedAt": "2026-09-14T01:11:08+04:00",

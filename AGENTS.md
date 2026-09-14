@@ -42,7 +42,7 @@
 - **Cleanup**: Worktrees must be removed upon PR merge (`git worktree remove .worktrees/<name>`).
 
 ## 6. Language Policy
-- **Repository Artifacts**: Code, docstrings, comments, documentation, commit messages, and PR titles must be 100% English.
+- **Repository Artifacts**: Code, docstrings, comments, documentation, commit messages, and PR titles must be 100% English, except where Russian is already the record: `.autopilot/` (the run record), `docs/prd/`, and the Russian READMEs — root `README.md`, paired with the English `README.en.md`, and `docs/README.md`. A link to another language version is labeled in that language and does not count as prose.
 - **User Dialogue**: Interactive chat responses and planning discussions should match the user's preferred language.
 
 ## 7. Test Discipline
@@ -61,7 +61,7 @@ Reads vendor documentation of two agent environments into machine-checkable YAML
 - `make install` — `uv sync`; `make pre-commit-run` — CI runs this before `make check`.
 - `make check` — the gate: ruff, `ruff format --check`, mypy strict over `src tests`, pytest.
 - `make test` / `make lint` / `make format` — subsets; one file is `uv run pytest tests/unit/test_convert.py`.
-- `uv run agent-skill-adapter convert <skill-dir> --source anthropic/claude-code@2.1.0 --target google/antigravity@2.0.0 [--specs specs] [--report FILE] [--out DIR] [--scope project|user] [--allow-stale]` — the JSON report goes to stdout (or to `--report`), the same run in words to stderr, and the verdict becomes the exit code; without `--out` nothing is written anywhere.
+- `uv run agent-skill-adapter convert <skill-dir> --source anthropic/claude-code@2.1.0 --target google/antigravity@2.0.0 [--specs specs] [--report FILE] [--out DIR] [--scope project|user] [--allow-stale]` — the JSON report goes to stdout (or to `--report`), the same run in words to stderr, and the verdict becomes exit code 0, 1 or 3 — a refusal replaces it with its own code (see Pitfalls); without `--out` nothing is written anywhere.
 - `uv run python -m agent_skill_adapter.envspec.gaps [--root specs] [--out specs/gaps]` — rebuild the gap report.
 - `make schema` — regenerate `specs/schema/envspec.schema.json` from the model (`envspec/schema.py`).
 - `uv run python -m agent_skill_adapter.envspec.freshness [--root specs] [--write]` — re-fetch vendor docs; the only command that uses the network.
@@ -110,10 +110,10 @@ Reads vendor documentation of two agent environments into machine-checkable YAML
 - Importing `urllib`/`http`/`socket`/`requests`/`httpx` anywhere but `freshness.py` fails `test_only_the_freshness_module_may_reach_the_network`.
 - Version comparison is dotted numbers only — no pre-release, no build metadata.
 - Exit codes read backwards on purpose: `gaps.main` returns 1 when nothing is missing or unknown (the transfer would be a file copy), while `freshness.main` returns 0 even with discrepancies found, and 2 only for a missing or empty root.
-- `convert` exits 0/1/3 with the verdict, 6 when the folder is not a readable skill, 7 when a destination would fall outside `--out`, 8 on a collision, 11 when `--report` could not be written; the last four are refusals, not verdicts, and leave the computed one alone — and 11 yields to any of the others. There is no code 2, and every outcome — refusals included — still prints a report, whose `error` field says why it is thin.
+- `convert` exits 0/1/3 with the verdict, 6 when the skill folder was not read (a filesystem error on it included), 7 when assembly could not write (a destination outside `--out`, or a filesystem error mid-copy), 8 on a collision, 11 when `--report` could not be written; the last four are refusals, not verdicts, and leave the computed one alone — and 11 yields to any of the others. There is no code 2, and every outcome — refusals included — still prints a report, whose `error` field says why it is thin.
 
 ### How Autopilot works here
-Сборка ведётся навыком `/autopilot`: требования, спецификация и таски — в `.autopilot/`,
-прогресс — `.autopilot/dashboard.html`, состояние — `.autopilot/state.js` («продолжи
-автопилот» поднимет его). Требование из `manifest.md` может снять только пользователь.
+The build runs under the `/autopilot` skill: requirements, specification and tickets live in
+`.autopilot/`, progress in `.autopilot/dashboard.html`, state in `.autopilot/state.js` — asking
+to continue the autopilot restores it. Only the user may drop a requirement from `manifest.md`.
 <!-- autopilot:end -->
