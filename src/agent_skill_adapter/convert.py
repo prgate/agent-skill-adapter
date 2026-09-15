@@ -871,7 +871,12 @@ def _plan(
     carried, hooks_file = _hook_place(target, scope, properties, hooks)
     if not carried or hooks_file is None:
         return parts, []
-    hook_part = _hook_part(out, hooks_file, carried)
+    # Through `_destination` like every other part: a layout path opens with the root it is
+    # measured from, and a hooks file spelled `<workspace-root>/...` or `~/...` -- as the
+    # descriptions do spell it -- would otherwise reach the report with the placeholder
+    # still in it, telling a person to put the entry in a folder named `<workspace-root>`.
+    where, _ = _destination(hooks_file, assembled_name)
+    hook_part = _hook_part(out, where, carried)
     return [*parts, hook_part], [
         f"the hook entry is staged at {hook_part.staged} and not merged into "
         f"{hook_part.destination}: that file belongs to the whole target environment and "

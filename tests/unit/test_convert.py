@@ -422,7 +422,7 @@ def hooks_tree(tmp_path: Path) -> Path:
         layout=[
             {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
             {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
-            {"id": "hooks.project", "path": ".agents/hooks.json"},
+            {"id": "hooks.project", "path": "<workspace-root>/.agents/hooks.json"},
         ],
     )
     return root
