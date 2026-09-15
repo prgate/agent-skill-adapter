@@ -1037,6 +1037,30 @@ def test_a_link_partway_down_the_destination_is_not_written_through(tmp_path: Pa
     assert list((out / "real").iterdir()) == []
 
 
+def test_a_loop_of_links_at_out_is_answered_with_a_report_and_not_a_traceback(
+    tmp_path: Path,
+) -> None:
+    """Two links pointing at each other are still a destination, and a destination is answered.
+
+    `Path.resolve()` raises `RuntimeError` on a cycle up to 3.12, which is neither a
+    `ConvertError` nor an `OSError`, so the run left as a traceback and the exit code 1 the
+    caller reads as "moved, and here is what it cost". A cycle is a place nothing can be
+    written to, which is what code 7 says.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    loop = tmp_path / "loop"
+    loop.mkdir()
+    (loop / "a").symlink_to(loop / "b")
+    (loop / "b").symlink_to(loop / "a")
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=loop / "a", allow_stale=True)
+
+    assert result.exit_code == 7
+    assert result.report["written"] == []
+    assert result.report["error"]
+
+
 def test_a_file_beside_the_skill_file_gets_a_row_and_is_never_lost_in_silence(
     tmp_path: Path,
 ) -> None:

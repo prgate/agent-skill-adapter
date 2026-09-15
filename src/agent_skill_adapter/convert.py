@@ -426,7 +426,8 @@ def _portable(value: Any, where: str, path: Path, rewritten: list[str]) -> Any:
                     f"{path}: `{where}` declares {_as_spelled(spelled[written])} and "
                     f"{_as_spelled(key)}, which are two keys in the file and the one key "
                     f"`{written}` in what this run writes; the value of the first would be "
-                    "dropped here without a word. Quote one of them, or remove it",
+                    "dropped here without a word. Rename one of them, or remove it -- "
+                    "quoting will not part them, because both cross as that same text",
                     UNREADABLE,
                 )
             spelled[written] = key
@@ -912,6 +913,28 @@ def _links_on_the_way(out: Path, staged: Path) -> None:
             )
 
 
+def _resolved(path: Path) -> Path:
+    """``path.resolve()``, with a loop of symbolic links answered rather than raised.
+
+    Up to Python 3.12 a cycle of links leaves `resolve` as a `RuntimeError`, which is neither
+    of the two shapes of refusal this module answers for: it would leave `convert` as a
+    traceback, and the process with the code a caller reads as "moved, and here is what it
+    cost". A cycle is a path nothing can be written through, which is what `UNWRITABLE` says.
+
+    Caught around the call and nowhere wider: a `RuntimeError` from anything else in here is
+    a fault of ours, and dressed up as a filesystem we could not write to it would be
+    reported as the caller's to fix.
+    """
+    try:
+        return path.resolve()
+    except RuntimeError as error:
+        raise ConvertError(
+            f"{path} is a loop of symbolic links, so it names no place to write to and "
+            f"nothing was written: {error}",
+            UNWRITABLE,
+        ) from error
+
+
 def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
     """Copy or write every planned part, once the whole plan is known to be safe to write.
 
@@ -936,7 +959,7 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
     # Over the whole plan, and answered again level by level in `_links_on_the_way` before
     # each part is written: this one rules out a destination that leads out of `out` at all,
     # that one rules out the path having changed since.
-    root = out.resolve()
+    root = _resolved(out)
     # The parent resolved and the last name left as written: what this asks is where the file
     # would be created. A link at the destination itself is not a way out of `out` but an
     # occupied place, and the check below answers for it with the code for that; resolving it
@@ -945,7 +968,7 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
     # `..` written there is a step back out, not a name to create, and left as text it would
     # read as a path under `out`.
     places = [
-        (part, Path(os.path.normpath(part.staged.parent.resolve() / part.staged.name)))
+        (part, Path(os.path.normpath(_resolved(part.staged.parent) / part.staged.name)))
         for part in parts
     ]
     outside = [str(part.staged) for part, place in places if not place.is_relative_to(root)]

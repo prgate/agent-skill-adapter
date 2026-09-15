@@ -24,7 +24,7 @@ window.STATE =
     { "id": "final",     "status": "done", "startedAt": "2026-09-15T01:25:00+04:00", "finishedAt": "2026-09-15T01:28:00+04:00" }
   ],
   "requirements": {
-    "total": 14, "done": 13, "inTicket": 0, "inSpec": 0,
+    "total": 14, "done": 14, "inTicket": 0, "inSpec": 0,
     "placeholder": 0, "deferred": 0, "dropped": 0
   },
   "tickets": [
@@ -42,7 +42,7 @@ window.STATE =
       "retries": 0, "repairs": 1, "handoffs": 0 }
   ],
   "singlePass": null,
-  "tests": "make check -> 123 passed (было 115 на старте прогона); make pre-commit-run -> все хуки Passed; прогон по 38 настоящим скиллам распределение не сдвинул",
+  "tests": "make check -> 127 passed (было 115 на старте прогона); make pre-commit-run -> все хуки Passed; прогон по 38 настоящим скиллам распределение не сдвинул",
   "debt": { "placeholders": [], "assumptions": [], "emptyEnv": [] },
   "additions": [],
   "coverage": { "findings": 7, "missing": 2, "halfCovered": 2, "unparentedAdditions": 3, "actedOn": "две дыры и две полупокрытые закрыты правкой спецификации до запуска тасков: русский текст в самом AGENTS.md, нечитаемый SKILL.md, какой код у какой стороны отказа, состав русских README. Три «сверх брифа» оставлены: расширение правки пути на все файлы .autopilot (тот же дефект в тех же файлах), имя ветки, раздел Вне рамок" },
