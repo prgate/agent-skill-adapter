@@ -1428,7 +1428,10 @@ def test_a_dangling_link_at_the_destination_is_an_occupied_place(tmp_path: Path)
     assert result.report["written"] == []
 
 
-def test_a_link_partway_down_the_destination_is_not_written_through(tmp_path: Path) -> None:
+@pytest.mark.parametrize("spelling", ["out", "a/../out"])
+def test_a_link_partway_down_the_destination_is_not_written_through(
+    tmp_path: Path, spelling: str
+) -> None:
     """A link at a level above the destination is a door out of it, and is refused as one.
 
     The check that a destination stays under `out` follows links, so one pointing away is
@@ -1436,18 +1439,25 @@ def test_a_link_partway_down_the_destination_is_not_written_through(tmp_path: Pa
     and it is still a path component this run did not create and cannot vouch for a moment
     later. `mkdir(parents=True, exist_ok=True)` walks through it without a word, so the
     question has to be asked of every level and not only of the last one.
+
+    Asked of both spellings of the same folder, because the levels are counted by text: with
+    a `..` in `--out` the levels below it were compared against the spelling the caller typed
+    rather than the one the bytes are written to, none of them matched, and every level in
+    between went unasked -- the link was written through on a path the report then called
+    clean.
     """
     root = assembly_tree(tmp_path)
     folder = skill(tmp_path / "example", "name: example\n")
-    out = tmp_path / "out"
-    (out / "real").mkdir(parents=True)
-    (out / ".agents").symlink_to(out / "real")
+    (tmp_path / "a").mkdir()
+    out = tmp_path / spelling
+    (tmp_path / "out" / "real").mkdir(parents=True)
+    (tmp_path / "out" / ".agents").symlink_to(tmp_path / "out" / "real")
 
     result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
 
     assert result.exit_code == 7
     assert result.report["written"] == []
-    assert list((out / "real").iterdir()) == []
+    assert list((tmp_path / "out" / "real").iterdir()) == []
 
 
 def test_a_loop_of_links_at_out_is_answered_with_a_report_and_not_a_traceback(

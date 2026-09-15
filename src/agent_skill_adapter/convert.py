@@ -1482,9 +1482,16 @@ def convert(
         # An undecidable run assembles nothing: the transferable half of a skill whose other
         # half nobody documented is a folder that looks converted and is not.
         if out is not None and verdict is not Verdict.UNDECIDABLE:
+            # One spelling of `out` from here down. Every check below counts the levels of a
+            # destination by text -- `_under` against a collapsed path, `_links_on_the_way`
+            # against `out` itself -- so a `..` the caller typed and a `..` collapsed away
+            # are two paths that name one folder, and levels compared across the two match
+            # nowhere: a link partway down goes unasked and is written through, on a run the
+            # report then calls clean.
+            out_dir = Path(os.path.normpath(out))
             parts, asked = _plan(
                 skill_dir,
-                Path(out),
+                out_dir,
                 target_spec,
                 scope,
                 properties,
@@ -1492,7 +1499,7 @@ def convert(
                 root=ground,
                 assembled_name=assembled_name,
             )
-            written, linked = _assemble(Path(out), parts)
+            written, linked = _assemble(out_dir, parts)
             advice += asked + linked
     except (ConvertError, OSError) as error:
         # Two shapes of refusal and one answer: what this module raised and what the
