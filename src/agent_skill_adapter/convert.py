@@ -1091,6 +1091,18 @@ def _links_within(copied_from: Path, label: str) -> list[str]:
     link inside it may point anywhere on the machine this command runs on.
     """
     if copied_from.is_symlink():
+        if label == SKILL_MD:
+            # The one link this command does read through, and so the one whose wording must
+            # not say it was not read: `_frontmatter` graded the run on its content and the
+            # copy staged that content, not the pointer. Named all the same, because the run
+            # reached into a folder nobody named on the command line to do it.
+            # `os.readlink`, not `resolve()`: it shows what the link itself says, and it does
+            # not raise on a loop -- a loop at `SKILL.md` never reaches here, refused as
+            # unreadable while the header was being read.
+            return [
+                f"`{SKILL_MD}` is a symbolic link to {os.readlink(copied_from)}; its content "
+                "was read and copied, not the link"
+            ]
         return [f"`{label}` is a symbolic link, carried over as one and not read"]
     if not copied_from.is_dir():
         return []
@@ -1127,8 +1139,9 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
     `_frontmatter`. Carrying it over as a link here -- almost always unresolvable, since it
     would point relative to a folder under ``out`` rather than the one it came from -- would
     stage a broken pointer behind a verdict computed from real content. It is copied through
-    the link instead, exactly as reading it already was, and is never named among the links
-    the second return value reports.
+    the link instead, exactly as reading it already was. It is still named among the links
+    the second return value reports, in words of its own: the run reached into a folder
+    nobody named on the command line, and a caller who is not told cannot know it did.
 
     The order of the three is the order of what they answer for. Leading out of ``out``
     first: that is the one promise this command makes about the caller's filesystem, and a
@@ -1264,7 +1277,7 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
     links = [
         line
         for part in parts
-        if part.copied_from is not None and part.label != SKILL_MD
+        if part.copied_from is not None
         for line in _links_within(part.copied_from, part.label)
     ]
     return written, links

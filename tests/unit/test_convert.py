@@ -950,8 +950,13 @@ def test_a_skill_file_that_is_a_symbolic_link_is_read_and_assembled_whole(
     staged = out / ".agents/skills/example-antigravity/SKILL.md"
     assert not staged.is_symlink()
     assert staged.read_text(encoding="utf-8") == content
-    assert not any(
-        "SKILL.md" in line and "symbolic link" in line for line in result.report["advice"]
+    # Said out loud, and not by being left out of the list: the run did read through a link
+    # into a folder nobody named on the command line, and the advice says which one. The
+    # verdict is still clean, because nothing about the skill was lost -- the wording has to
+    # carry that, so it says the content was read and copied rather than that it was not read.
+    assert any(
+        "SKILL.md" in line and "symbolic link" in line and str(real / "SKILL.md") in line
+        for line in result.report["advice"]
     )
     assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
 
