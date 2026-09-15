@@ -223,6 +223,16 @@ Both are far above anything a person writes and far below what would cost this c
 memory or its stack.
 """
 
+FRONTMATTER_CLOSE = re.compile(r"\n---[ \t]*(?:\n|\Z)")
+"""The line that closes a header: exactly ``---``, not merely a line starting with it.
+
+A YAML key is free to start with three dashes -- ``---note: below`` is as valid a mapping
+entry as any other -- so a scan for the text ``---`` at the start of a line would close the
+header there and read everything past it as body, unnoticed by the person and the
+frontmatter parser both. Every conventional frontmatter reader closes only at a line with
+nothing else on it, which is what this pattern asks for.
+"""
+
 # ponytail: named here because the format of the descriptions has no field for "this entry
 # is required" -- the word lives in the prose of a `note`. The way up is a flag on
 # `Capability`, after which this list is read off the descriptions rather than written here.
@@ -515,13 +525,13 @@ def _frontmatter(path: Path) -> tuple[dict[str, Any], list[str]]:
         raise ConvertError(
             f"{path}: no frontmatter; a skill file opens with a `---` line", UNREADABLE
         )
-    end = text.find("\n---", 3)
-    if end < 0:
+    closing = FRONTMATTER_CLOSE.search(text, 3)
+    if closing is None:
         raise ConvertError(
             f"{path}: the frontmatter opened on line 1 is never closed by a `---` line",
             UNREADABLE,
         )
-    header = text[3:end]
+    header = text[3 : closing.start()]
     if len(header.encode("utf-8")) > FRONTMATTER_BYTES:
         raise ConvertError(
             f"{path}: the frontmatter is longer than {FRONTMATTER_BYTES} bytes, which is "

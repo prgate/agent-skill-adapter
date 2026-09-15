@@ -809,6 +809,62 @@ def test_a_target_only_capability_is_judged_by_its_support_not_by_having_a_note(
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
 
+def test_a_line_only_starting_with_three_dashes_does_not_close_the_frontmatter(
+    tmp_path: Path,
+) -> None:
+    """The header closes at a line that is exactly `---`, not at one merely starting with it.
+
+    `---note: below` is a valid YAML key and reads as a frontmatter line to a careless
+    scanner, but every conventional frontmatter reader treats it as content, not as the
+    closing delimiter. Closing early there would hide every key past it -- `allowed-tools`
+    among them -- from grading while still copying the file byte for byte.
+    """
+    root = tmp_path / "specs"
+    write(
+        root,
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+            {"id": "skill.frontmatter.allowed-tools", "support": "supported"},
+        ],
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+            {
+                "id": "skill.frontmatter.allowed-tools",
+                "support": "unsupported",
+                "note": "Antigravity carries no tool allow-list.",
+            },
+        ],
+        layout=[
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+        ],
+    )
+    folder = tmp_path / "example"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text(
+        "---\nname: tidy-imports\ndescription: sorts your imports\n---note: below\n"
+        "allowed-tools: [Bash, WebFetch]\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert properties(result.report)["skill.frontmatter.allowed-tools"] == (
+        "missing",
+        "extension",
+        "lossy",
+    )
+
+
 def test_a_symbolic_link_inside_the_skill_folder_is_carried_as_a_link_and_named(
     tmp_path: Path,
 ) -> None:
