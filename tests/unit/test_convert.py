@@ -548,6 +548,101 @@ def test_the_skill_is_assembled_at_the_paths_the_target_description_names(tmp_pa
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
 
+def test_a_skill_named_by_a_relative_dot_is_still_assembled_inside_its_own_folder(
+    tmp_path: Path,
+) -> None:
+    """``convert .`` names no folder of its own: ``Path(".").name`` is empty.
+
+    An empty ``<skill-name>`` would expand the skills-root layout path down to nothing extra,
+    assembling the skill loose at the skills root instead of inside a folder of its own --
+    beside, not inside, any other skill already there.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n", directories=("scripts",))
+    out = tmp_path / "out"
+    cwd = Path.cwd()
+    os.chdir(folder)
+    try:
+        result = convert(".", SOURCE, TARGET, root=root, out=out, allow_stale=True)
+    finally:
+        os.chdir(cwd)
+
+    assert [(entry["from"], entry["to"]) for entry in result.report["written"]] == [
+        ("SKILL.md", ".agents/skills/example/SKILL.md"),
+        ("scripts/", ".agents/skills/example/scripts/"),
+    ]
+    assert result.report["skill"]["name"] == "example"
+
+
+def test_a_part_only_the_target_names_a_place_for_is_clean_not_undeclared(
+    tmp_path: Path,
+) -> None:
+    """``compare`` matches only what the source declares -- the target may know more.
+
+    ``examples/`` is a directory only `google/antigravity`'s own layout names a place for;
+    neither `anthropic/claude-code` nor the open specification it extends mentions it. The
+    very same run copies it to the path the target names, so the row must not read as
+    "undeclared" while the assembly acts on exactly the declaration it denies.
+    """
+    root = assembly_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+            {"id": "skill.frontmatter.deprecated", "support": "unsupported"},
+        ],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skill.dir.scripts", "path": "<skill-name>/scripts/"},
+            {"id": "skill.dir.examples", "path": "<skill-name>/examples/"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+        ],
+    )
+    folder = skill(tmp_path / "example", "name: example\n", directories=("examples",))
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+    rows = {entry["id"]: entry for entry in result.report["properties"]}
+
+    assert properties(result.report)["skill.dir.examples"] == ("reproduced", "extension", "clean")
+    note = rows["skill.dir.examples"]["note"] or ""
+    assert "undeclared" not in note.lower()
+    assert {
+        "from": "examples/",
+        "to": ".agents/skills/example/examples/",
+        "path": str(out / ".agents/skills/example/examples"),
+    } in result.report["written"]
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_a_symbolic_link_inside_the_skill_folder_is_carried_as_a_link_and_named(
+    tmp_path: Path,
+) -> None:
+    """A link is never read, whatever it points at: copied as a link and named in the advice.
+
+    Reading through a link inside the skill folder -- `scripts -> ~/.ssh`, say -- would
+    materialise a stranger's files as real bytes inside the converted skill, in a run that
+    still called itself clean. The link is carried over as a link, and the report says so.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    secret = tmp_path / "secret"
+    secret.mkdir()
+    (secret / "id_rsa").write_text("do-not-copy\n", encoding="utf-8")
+    (folder / "scripts").symlink_to(secret)
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    staged = out / ".agents/skills/example/scripts"
+    assert staged.is_symlink()
+    assert os.readlink(staged) == str(secret)
+    assert any("symbolic link" in line and "scripts" in line for line in result.report["advice"])
+
+
 def test_an_occupied_destination_stops_the_assembly_and_keeps_what_is_there(
     tmp_path: Path,
 ) -> None:
@@ -616,28 +711,32 @@ def test_two_parts_of_one_plan_aimed_at_one_destination_stop_it_before_the_first
 
 
 def test_a_copy_that_fails_part_way_leaves_no_half_assembled_skill(tmp_path: Path) -> None:
-    """A link to nothing inside a bundle: exit code 7, a report, and an empty `--out`.
+    """A file this process cannot read, inside a bundle: exit code 7, a report, and empty `--out`.
 
-    `shutil` refuses to copy a link whose target is not there, and the refusal is an
-    operating system error like any other -- reaching the caller as a traceback it would
-    exit 1, the code for a transfer that lost something, on a run that transferred nothing.
-    The skill file was copied before the bundle failed, and it is taken back: half an
-    assembled skill on disk is indistinguishable from a whole one.
+    The refusal is an operating system error like any other -- reaching the caller as a
+    traceback it would exit 1, the code for a transfer that lost something, on a run that
+    transferred nothing. The skill file was copied before the bundle failed, and it is taken
+    back: half an assembled skill on disk is indistinguishable from a whole one.
     """
     root = assembly_tree(tmp_path)
     folder = skill(tmp_path / "example", "name: example\n", directories=("scripts",))
-    (folder / "scripts" / "dangling").symlink_to(tmp_path / "nowhere")
+    locked = folder / "scripts" / "locked"
+    locked.write_text("secret\n", encoding="utf-8")
+    locked.chmod(0o000)
     out = tmp_path / "out"
 
-    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+    try:
+        result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+    finally:
+        locked.chmod(0o644)
 
     assert result.exit_code == 7
     assert result.report["written"] == []
     assert result.report["error"]
     # What is left, and not merely what is not: the empty skeleton of the destination and
-    # nothing else -- no file, and no link pointing at one. A run that left the copied
-    # `SKILL.md`, or the half-copied bundle with its dangling link in it, would pass a test
-    # that only counted files it could open.
+    # nothing else -- no file, and no half-copied bundle. A run that left the copied
+    # `SKILL.md`, or the half-copied bundle it never finished, would pass a test that only
+    # counted files it could open.
     assert sorted(entry.relative_to(out).as_posix() for entry in out.rglob("*")) == [
         ".agents",
         ".agents/skills",

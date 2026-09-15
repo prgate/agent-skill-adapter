@@ -120,6 +120,18 @@ The module answers this way throughout: the anchor names its line, the size limi
 UNDECLARED = "no entry with this id in either description"
 """Why a property carries no words from either side: nobody documented it under that id."""
 
+TARGET_ONLY = (
+    "no entry with this id in the source description or what it extends; the target "
+    "names one anyway, and what it says about it is what this run relies on"
+)
+"""Why a property is clean though `compare` never carried it: the target alone knows it.
+
+`compare` matches only what the *source* declares, by id, within its own list -- so an id
+only the *target*'s capabilities or layout carry never earns a `Gap` at all, and reads as
+`UNDECLARED` unless this is asked of the target directly. It is not the same silence: the
+target has a documented place or word for the entry, and the assembly writes to it in the
+very same run that would otherwise call the entry lossy and undeclared."""
+
 _HOW_TO_KEEP_A_HOOK = (
     "Move the rule into the body of the skill: prose the model may disregard is weaker "
     "than a hook by an order of magnitude, and it is not the same guarantee.",
@@ -614,15 +626,31 @@ def _kind(entry_id: str, gap: Gap | None) -> str:
     return "hook-event" if entry_id.startswith(EVENT) else ""
 
 
+def _target_alone(target: EnvSpec, entry_id: str) -> str | None:
+    """What the target says about ``entry_id`` on its own, or ``None`` when it names nothing.
+
+    `compare` never asks about an id neither the source nor what it extends declares, so an
+    id only the *target*'s capabilities or layout carry -- a directory both a real skill and
+    the target's own layout happen to name, say -- reaches `_judge` with no `Gap` at all.
+    Asked here, directly of the target, rather than folded into the source-only silence
+    `UNDECLARED` speaks for.
+    """
+    layout_path = _layout(target, entry_id)
+    if layout_path is not None:
+        return layout_path
+    return next((entry.note for entry in target.capabilities if entry.id == entry_id), None)
+
+
 def _judge(
-    findings: Sequence[Finding], gaps: Mapping[str, Gap]
+    findings: Sequence[Finding], gaps: Mapping[str, Gap], target: EnvSpec
 ) -> tuple[list[Property], list[str]]:
     """Every finding against the comparison, once per entry id, plus the advice it earns.
 
-    An id the comparison does not carry is ``unknown`` from an ``extension``: the source
-    description never declared it, so no open format ever promised it either, and nothing
-    is known about what the target does with it. It still gets a row -- a property that
-    fell out of the report silently is the one failure this command cannot be trusted after.
+    An id the comparison does not carry is ``unknown`` from an ``extension`` -- unless the
+    *target* documents it on its own, which `compare` has no way to say: it matches only
+    what the source declares. An entry only the target names is not the silence `UNDECLARED`
+    describes, and reporting it that way while the very same run copies it to the place the
+    target names would tell the caller both that nobody knows where it goes and where it went.
 
     One id, one row, however many findings asked about it: ``hook.decision.block`` is asked
     once by every declared hook, and the row names all of them. Naming the first and dropping
@@ -636,8 +664,16 @@ def _judge(
     advice: list[str] = []
     for entry_id, found_as in asked_by.items():
         gap = gaps.get(entry_id)
-        outcome = gap.outcome if gap is not None else Outcome.UNKNOWN
-        origin = gap.origin if gap is not None else Origin.EXTENSION
+        target_only = None if gap is not None else _target_alone(target, entry_id)
+        if gap is not None:
+            outcome, origin = gap.outcome, gap.origin
+            source_says, target_says, note = gap.source_note, gap.target_note, None
+        elif target_only is not None:
+            outcome, origin = Outcome.REPRODUCED, Origin.EXTENSION
+            source_says, target_says, note = None, target_only, TARGET_ONLY
+        else:
+            outcome, origin = Outcome.UNKNOWN, Origin.EXTENSION
+            source_says, target_says, note = None, None, UNDECLARED
         verdict = verdict_of(outcome, origin)
         properties.append(
             Property(
@@ -646,9 +682,9 @@ def _judge(
                 outcome=outcome,
                 origin=origin,
                 verdict=verdict,
-                source_says=gap.source_note if gap is not None else None,
-                target_says=gap.target_note if gap is not None else None,
-                note=None if gap is not None else UNDECLARED,
+                source_says=source_says,
+                target_says=target_says,
+                note=note,
             )
         )
         if verdict is not Verdict.CLEAN:
@@ -660,6 +696,17 @@ def _judge(
 def _layout(spec: EnvSpec, entry_id: str) -> str | None:
     """The path the description gives ``entry_id``, or ``None`` when it names none."""
     return next((entry.path for entry in spec.layout if entry.id == entry_id), None)
+
+
+def _skill_name(skill_dir: Path) -> str:
+    """The skill's own name, read off the resolved folder rather than the path as spelled.
+
+    ``skill_dir.name`` is empty for ``.`` and ``..`` -- the very paths a caller spells that
+    way to say "the folder I am standing in" -- and an empty name would expand
+    ``<skill-name>`` in a layout path down to nothing, assembling the skill at the skills
+    root instead of inside a folder of its own there.
+    """
+    return skill_dir.resolve().name
 
 
 def _destination(template: str, skill_name: str) -> tuple[str, str]:
@@ -725,7 +772,7 @@ def _plan(
         # or a part could end up written and called left behind, or in neither list.
         if inside is None:
             continue
-        where, staged = _destination(f"{root.rstrip('/')}/{inside}", skill_dir.name)
+        where, staged = _destination(f"{root.rstrip('/')}/{inside}", _skill_name(skill_dir))
         parts.append(_Part(label, where, _under(out, staged), copied_from=skill_dir / label))
     carried, hooks_file = _hook_place(target, scope, properties, hooks)
     if not carried or hooks_file is None:
@@ -935,7 +982,28 @@ def _resolved(path: Path) -> Path:
         ) from error
 
 
-def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
+def _links_within(copied_from: Path, label: str) -> list[str]:
+    """Every symbolic link under ``copied_from``, named the way the report names a part.
+
+    A link is carried over as a link and never read -- neither its own bytes, when it is the
+    part itself, nor its target's, when it sits somewhere inside a bundled directory copied
+    whole. Named here so that a caller sees which paths of the assembled skill are links and
+    not the files or directories they appear to be: the skill folder is a stranger's, and a
+    link inside it may point anywhere on the machine this command runs on.
+    """
+    if copied_from.is_symlink():
+        return [f"`{label}` is a symbolic link, carried over as one and not read"]
+    if not copied_from.is_dir():
+        return []
+    return [
+        f"`{label}{entry.relative_to(copied_from).as_posix()}` is a symbolic link, carried "
+        "over as one and not read"
+        for entry in sorted(copied_from.rglob("*"))
+        if entry.is_symlink()
+    ]
+
+
+def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], list[str]]:
     """Copy or write every planned part, once the whole plan is known to be safe to write.
 
     Two questions are asked of every destination before the first byte of the first one is
@@ -946,6 +1014,14 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
     A symbolic link counts as an occupied place even when it points at nothing: ``exists``
     answers ``False`` for a broken one, and writing to it would create its target somewhere
     the caller never named.
+
+    A symbolic link inside the skill folder is carried over as a link and never read, on
+    either side of the copy: ``shutil.copytree`` is asked for the same, ``shutil.copy2``
+    told not to follow one, and a part that is itself a link is checked for that before it is
+    asked whether it is a directory -- ``is_dir`` follows a link, and asking it first would
+    read straight through the one thing this command must not read through. The second
+    return value names every link a caller must know is a link, so a run that carries one
+    over does not also read as an ordinary, clean copy.
 
     The order of the three is the order of what they answer for. Leading out of ``out``
     first: that is the one promise this command makes about the caller's filesystem, and a
@@ -1038,8 +1114,13 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
             started.append(part)
             if part.content is not None:
                 part.staged.write_text(part.content, encoding="utf-8")
+            elif part.copied_from is not None and part.copied_from.is_symlink():
+                # Checked before `is_dir`, which follows a link to ask about what it points
+                # at rather than the link itself, and would send a link to a directory into
+                # the branch below -- reading through the one thing that must not be read.
+                shutil.copy2(part.copied_from, part.staged, follow_symlinks=False)
             elif part.copied_from is not None and part.copied_from.is_dir():
-                shutil.copytree(part.copied_from, part.staged)
+                shutil.copytree(part.copied_from, part.staged, symlinks=True)
             elif part.copied_from is not None:
                 shutil.copy2(part.copied_from, part.staged)
     except (OSError, ConvertError) as error:
@@ -1060,9 +1141,16 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
             # to transfer was decided before any of it was written.
             UNWRITABLE,
         ) from error
-    return [
+    written = [
         {"from": part.label, "to": part.destination, "path": str(part.staged)} for part in parts
     ]
+    links = [
+        line
+        for part in parts
+        if part.copied_from is not None
+        for line in _links_within(part.copied_from, part.label)
+    ]
+    return written, links
 
 
 def _environment(text: str | None) -> dict[str, str] | None:
@@ -1135,7 +1223,7 @@ def _report(
         "exit_code": exit_code,
         "source": _environment(source),
         "target": _environment(target),
-        "skill": {"path": str(skill_dir), "name": skill_dir.name},
+        "skill": {"path": str(skill_dir), "name": _skill_name(skill_dir)},
         "properties": [
             {
                 "id": entry.id,
@@ -1233,7 +1321,7 @@ def convert(
         gaps, target_spec = _gaps(root, source, target, allow_stale)
         side = UNREADABLE
         findings, front, rewritten = _findings(skill_dir)
-        properties, advice = _judge(findings, gaps)
+        properties, advice = _judge(findings, gaps, target_spec)
         declared = front.get(HOOKS_KEY)
         hooks = declared if isinstance(declared, Mapping) else {}
         # Both asked before the branch below and not inside it: whether the target names a
@@ -1262,8 +1350,8 @@ def convert(
             parts, asked = _plan(
                 skill_dir, Path(out), target_spec, scope, properties, hooks, root=ground
             )
-            written = _assemble(Path(out), parts)
-            advice += asked
+            written, linked = _assemble(Path(out), parts)
+            advice += asked + linked
     except (ConvertError, OSError) as error:
         # Two shapes of refusal and one answer: what this module raised and what the
         # filesystem raised both leave as a report and a code, so that reading the answer
