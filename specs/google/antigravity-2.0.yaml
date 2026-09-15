@@ -607,6 +607,21 @@ capabilities:
     source_id: hooks-events
     note: "Absent from the supported-events table; the page does not say it is unavailable."
 
+  # --- What a hook may decide -----------------------------------------------
+  # PreToolUse above is `supported`: the event fires. Whether a hook of it can stop the
+  # tool call is a second question and so a second entry (ADR-0007), and this is where the
+  # answer would be — the section that defines what a hook entry is and how its command is
+  # run. It is not answered.
+  - id: hook.decision.block
+    kind: hook-decision
+    support: unknown
+    source_id: hooks-config
+    note: >-
+      This section defines a hook as a matcher and a command; it says nothing about what a
+      non-zero exit code from that command does, and the supported-events table says only
+      when each event fires. No veto is documented — and none is ruled out either, so this
+      is silence, not a denial.
+
   # --- Configuration files --------------------------------------------------
   - id: settings.file.hooks
     kind: settings-file

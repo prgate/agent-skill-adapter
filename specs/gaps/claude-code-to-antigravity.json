@@ -22,7 +22,7 @@
   "counts": {
     "reproduced": 26,
     "missing": 0,
-    "unknown": 73,
+    "unknown": 74,
     "out-of-scope": 3
   },
   "declared_by_specification": {
@@ -103,6 +103,17 @@
       "matched": false,
       "source_note": "~/.claude/commands/*.md",
       "target_note": "(no matching entry in the target description)"
+    },
+    {
+      "id": "hook.decision.block",
+      "kind": "hook-decision",
+      "source_support": "supported",
+      "target_support": "unknown",
+      "outcome": "unknown",
+      "origin": "extension",
+      "matched": true,
+      "source_note": "a hook can block what the event precedes: the tool call, or the expansion",
+      "target_note": "This section defines a hook as a matcher and a command; it says nothing about what a non-zero exit code from that command does, and the supported-events table says only when each event fires. No veto is documented — and none is ruled out either, so this is silence, not a denial."
     },
     {
       "id": "hook.event.ConfigChange",
@@ -310,7 +321,7 @@
       "outcome": "reproduced",
       "origin": "extension",
       "matched": true,
-      "source_note": "before a tool call executes; can block it",
+      "source_note": "before a tool call executes; the power to block it is the entry `hook.decision.block`",
       "target_note": "Fires before a tool is executed; the matcher targets the tool name."
     },
     {

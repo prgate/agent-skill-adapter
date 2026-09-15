@@ -72,7 +72,15 @@ class Source(_Identified):
 class Capability(_Entry):
     """One documented property of the environment."""
 
-    kind: Literal["skill-field", "subagent-field", "hook-event", "settings-file"]
+    kind: Literal["skill-field", "subagent-field", "hook-event", "hook-decision", "settings-file"]
+    """What the entry is about.
+
+    ``hook-event`` is that the environment fires an event; ``hook-decision`` is what a hook
+    of it may decide -- to stop what is about to happen, say. Two kinds because they are two
+    claims: an environment can fire an event it lets no hook veto. Why the pair is split
+    here rather than handled in the converter is ADR-0007.
+    """
+
     support: Support
     since_version: str | None = None
     note: str | None = None

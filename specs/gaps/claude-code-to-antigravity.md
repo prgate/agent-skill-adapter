@@ -10,7 +10,7 @@ This list is computed, not written: it is the output of comparing the two enviro
 | --- | --- | --- | --- |
 | reproduced | 26 | 6 | 0 |
 | missing | 0 | 0 | 0 |
-| unknown | 73 | 4 | 11 |
+| unknown | 74 | 4 | 11 |
 | out-of-scope | 3 | 3 | 0 |
 
 ## Entries
@@ -23,6 +23,7 @@ This list is computed, not written: it is the output of comparing the two enviro
 | agents.user | layout | extension | supported | supported | reproduced | ~/.claude/agents/*.md -> ~/.gemini/config/agents/ |
 | commands.project | layout | extension | supported | unknown | unknown | .claude/commands/*.md -> (no matching entry in the target description) |
 | commands.user | layout | extension | supported | unknown | unknown | ~/.claude/commands/*.md -> (no matching entry in the target description) |
+| hook.decision.block | hook-decision | extension | supported | unknown | unknown | a hook can block what the event precedes: the tool call, or the expansion -> This section defines a hook as a matcher and a command; it says nothing about what a non-zero exit code from that command does, and the supported-events table says only when each event fires. No veto is documented — and none is ruled out either, so this is silence, not a denial. |
 | hook.event.ConfigChange | hook-event | extension | supported | unknown | unknown | when a configuration file changes during a session -> Absent from the supported-events table; the page does not say it is unavailable. |
 | hook.event.CwdChanged | hook-event | extension | supported | unknown | unknown | when the working directory changes -> Absent from the supported-events table; the page does not say it is unavailable. |
 | hook.event.DirectoryAdded | hook-event | extension | supported | unknown | unknown | when a working directory is added mid-session via /add-dir -> Absent from the supported-events table; the page does not say it is unavailable. |
@@ -41,7 +42,7 @@ This list is computed, not written: it is the output of comparing the two enviro
 | hook.event.PostToolUseFailure | hook-event | extension | supported | unknown | unknown | after a tool call fails -> Absent from the supported-events table; the page does not say it is unavailable. |
 | hook.event.PreCompact | hook-event | extension | supported | unknown | unknown | before context compaction -> Absent from the supported-events table; the page does not say it is unavailable. |
 | hook.event.PreModelSwitch | hook-event | extension | supported | unknown | unknown | before a requested model switch is applied; can block the switch -> Absent from the supported-events table; the page does not say it is unavailable. |
-| hook.event.PreToolUse | hook-event | extension | supported | supported | reproduced | before a tool call executes; can block it -> Fires before a tool is executed; the matcher targets the tool name. |
+| hook.event.PreToolUse | hook-event | extension | supported | supported | reproduced | before a tool call executes; the power to block it is the entry `hook.decision.block` -> Fires before a tool is executed; the matcher targets the tool name. |
 | hook.event.SessionEnd | hook-event | extension | supported | unknown | unknown | when a session terminates -> Absent from the supported-events table; the page does not say it is unavailable. |
 | hook.event.SessionStart | hook-event | extension | supported | unknown | unknown | when a session begins or resumes -> Absent from the supported-events table; the page does not say it is unavailable. |
 | hook.event.Setup | hook-event | extension | supported | unknown | unknown | on --init-only, or --init / --maintenance in -p mode -> Absent from the supported-events table; the page does not say it is unavailable. |
