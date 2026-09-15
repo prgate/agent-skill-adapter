@@ -1388,8 +1388,32 @@ def _report(
     }
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+"""Every character that does something to a terminal rather than appearing in it."""
+
+
+def _plain(line: str) -> str:
+    """One line of the summary with its control characters spelled out instead of acted on."""
+    return _CONTROL.sub(lambda match: f"\\x{ord(match.group()):02x}", line)
+
+
 def _summary(report: dict[str, Any]) -> str:
-    """The same run in words: the verdict first, then one line per property, then the advice."""
+    """The same run in words: the verdict first, then one line per property, then the advice.
+
+    Every line is escaped before it is joined, and the joining newlines are put in after: a
+    frontmatter key, a file name and the text of a YAML parser's complaint are all a
+    stranger's writing, and they reach a terminal here. A newline inside one of them writes a
+    row of its own -- a property claiming it transferred cleanly, in the same columns as the
+    rows this run computed -- and an escape sequence repaints or wipes the screen of whoever
+    ran the command. Escaped at the one sink rather than at each of the many places a value
+    enters, because a value that enters somewhere new is then safe without anyone noticing it
+    had to be. The machine-readable report is untouched: `json.dumps` already escapes both,
+    and a reader of it is not a terminal.
+
+    A multi-line YAML error becomes one line with a literal ``\x0a`` in it, which is the
+    price. U+2028 and U+2029, and the bidirectional overrides, are deliberately not covered:
+    no terminal acts on them the way it acts on these.
+    """
     skill = report["skill"]["path"]
     lines = [f"{skill}: {report['outcome']} (exit {report['exit_code']})"]
     if report["error"]:
@@ -1403,7 +1427,7 @@ def _summary(report: dict[str, Any]) -> str:
         f"  wrote {entry['path']} (it belongs at {entry['to']})" for entry in report["written"]
     ]
     lines += [f"  advice: {line}" for line in report["advice"]]
-    return "\n".join(lines) + "\n"
+    return "\n".join(_plain(line) for line in lines) + "\n"
 
 
 def refused(result: Conversion, exit_code: int, message: str) -> Conversion:

@@ -898,6 +898,36 @@ def test_a_header_whose_lines_end_in_crlf_closes_where_a_reader_sees_it_close(
     assert result.report["skill"]["name"] == "example"
 
 
+def test_the_words_for_a_person_cannot_be_forged_by_what_is_written_in_the_skill(
+    tmp_path: Path,
+) -> None:
+    """A frontmatter key is a stranger's text: it never reaches a terminal as control characters.
+
+    The summary is one line per property, and a key carrying a newline writes as many lines
+    as it likes -- a forged row claiming a property transferred cleanly, indistinguishable
+    from the rows this run actually computed. An escape sequence in the same place moves the
+    cursor, repaints or wipes the screen of whoever ran the command. The machine-readable
+    report is safe either way, because `json.dumps` escapes both; the words for a person are
+    the sink that has to.
+    """
+    root = assembly_tree(tmp_path)
+    folder = tmp_path / "example"
+    folder.mkdir()
+    forged = "x\n  clean        forged.row -- injected (reproduced, specification)"
+    (folder / "SKILL.md").write_text(
+        "---\ndescription: what it does\nname: example\n"
+        f"{json.dumps(forged)}: 1\n{json.dumps(chr(27) + '[2Jwiped')}: 2\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert "\x1b" not in result.summary
+    assert not any(
+        line.startswith("  clean        forged.row") for line in result.summary.splitlines()
+    )
+
+
 def test_a_symbolic_link_inside_the_skill_folder_is_carried_as_a_link_and_named(
     tmp_path: Path,
 ) -> None:
