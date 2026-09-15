@@ -865,6 +865,28 @@ def test_a_line_only_starting_with_three_dashes_does_not_close_the_frontmatter(
     )
 
 
+def test_a_header_whose_lines_end_in_crlf_closes_where_a_reader_sees_it_close(
+    tmp_path: Path,
+) -> None:
+    """A skill file written on Windows is a skill file: `\r\n` closes the header as `\n` does.
+
+    The closing line of a CRLF file is `---\r\n`, and a pattern that admits only a bare
+    `\n` never finds it -- the whole file reads as an unclosed header and the run refuses a
+    skill every editor, every frontmatter reader and both target environments accept.
+    """
+    root = assembly_tree(tmp_path)
+    folder = tmp_path / "example"
+    folder.mkdir()
+    (folder / "SKILL.md").write_bytes(
+        b"---\r\ndescription: what it does\r\nname: example\r\n---\r\n\r\nBody.\r\n"
+    )
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert result.exit_code != 6
+    assert result.report["skill"]["name"] == "example"
+
+
 def test_a_symbolic_link_inside_the_skill_folder_is_carried_as_a_link_and_named(
     tmp_path: Path,
 ) -> None:

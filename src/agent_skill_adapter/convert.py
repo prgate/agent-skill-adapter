@@ -223,7 +223,7 @@ Both are far above anything a person writes and far below what would cost this c
 memory or its stack.
 """
 
-FRONTMATTER_CLOSE = re.compile(r"\n---[ \t]*(?:\n|\Z)")
+FRONTMATTER_CLOSE = re.compile(r"\r?\n---[ \t]*(?:\r?\n|\Z)")
 """The line that closes a header: exactly ``---``, not merely a line starting with it.
 
 A YAML key is free to start with three dashes -- ``---note: below`` is as valid a mapping
@@ -231,6 +231,9 @@ entry as any other -- so a scan for the text ``---`` at the start of a line woul
 header there and read everything past it as body, unnoticed by the person and the
 frontmatter parser both. Every conventional frontmatter reader closes only at a line with
 nothing else on it, which is what this pattern asks for.
+
+CRLF line endings close a header exactly as LF ones do: a skill file written on Windows is
+a skill file, and the bytes are copied as they were found either way.
 """
 
 # ponytail: named here because the format of the descriptions has no field for "this entry
