@@ -1098,11 +1098,12 @@ def _resolved(path: Path) -> Path:
 def _links_within(copied_from: Path, label: str) -> list[str]:
     """Every symbolic link under ``copied_from``, named the way the report names a part.
 
-    A link is carried over as a link and never read -- neither its own bytes, when it is the
-    part itself, nor its target's, when it sits somewhere inside a bundled directory copied
-    whole. Named here so that a caller sees which paths of the assembled skill are links and
-    not the files or directories they appear to be: the skill folder is a stranger's, and a
-    link inside it may point anywhere on the machine this command runs on.
+    A ``SKILL.md`` that is a link is read and its content copied; every other link is carried
+    over as a link and never read -- neither its own bytes, when it is the part itself, nor its
+    target's, when it sits somewhere inside a bundled directory copied whole. Named here so that
+    a caller sees which paths of the assembled skill are links and not the files or directories
+    they appear to be: the skill folder is a stranger's, and a link inside it may point anywhere
+    on the machine this command runs on.
     """
     if copied_from.is_symlink():
         if label == SKILL_MD:
@@ -1412,7 +1413,7 @@ def _plain(line: str) -> str:
 
 
 def _summary(report: dict[str, Any]) -> str:
-    """The same run in words: the verdict first, then one line per property, then the advice.
+    r"""The same run in words: the verdict first, then one line per property, then the advice.
 
     Every line is escaped before it is joined, and the joining newlines are put in after: a
     frontmatter key, a file name and the text of a YAML parser's complaint are all a
