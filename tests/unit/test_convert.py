@@ -574,6 +574,54 @@ def test_a_skill_named_by_a_relative_dot_is_still_assembled_inside_its_own_folde
     assert result.report["skill"]["name"] == "example"
 
 
+def test_a_skill_folder_that_is_a_loop_of_links_is_answered_with_a_report_and_not_a_traceback(
+    tmp_path: Path,
+) -> None:
+    """A skill folder that is itself a loop of links is a refusal, not a crash.
+
+    `_findings` already refuses this as exit code 6, `no such folder` -- `Path.is_dir()`
+    answers `False` for a cycle rather than raising. The report is then built from that
+    refusal, and building it must not resolve the very folder that could not be read: doing
+    so raises the `RuntimeError` a loop of links gives `Path.resolve()`, uncaught by the
+    `ConvertError`/`OSError` handler around it, leaving a traceback and exit code 1 where the
+    caller was promised a report and exit code 6.
+    """
+    root = four_row_tree(tmp_path)
+    loop = tmp_path / "loop"
+    loop.mkdir()
+    (loop / "a").symlink_to(loop / "b")
+    (loop / "b").symlink_to(loop / "a")
+
+    result = convert(loop / "a", SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert result.exit_code == 6
+    assert result.verdict is Verdict.UNDECIDABLE
+    assert result.report["properties"] == []
+    assert result.report["skill"]["name"] == "a"
+
+
+def test_a_skill_installed_as_a_link_keeps_the_name_it_is_invoked_by(tmp_path: Path) -> None:
+    """The folder name as spelled, link included, is the skill's name -- not its link target.
+
+    A dotfiles-managed skill is routinely installed as a link: ``installed-as -> real-name``.
+    Whoever calls it does so by ``installed-as``, and resolving the link would assemble the
+    skill under ``real-name`` instead while the report went on calling it ``installed-as`` --
+    one run, two names for the same skill.
+    """
+    root = assembly_tree(tmp_path)
+    real = skill(tmp_path / "real-name", "name: example\n")
+    link = tmp_path / "installed-as"
+    link.symlink_to(real)
+    out = tmp_path / "out"
+
+    result = convert(link, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assert result.report["skill"]["path"] == str(link)
+    assert result.report["skill"]["name"] == "installed-as"
+    assert (out / ".agents/skills/installed-as/SKILL.md").is_file()
+    assert not (out / ".agents/skills/real-name").exists()
+
+
 def test_a_part_only_the_target_names_a_place_for_is_clean_not_undeclared(
     tmp_path: Path,
 ) -> None:
@@ -616,6 +664,63 @@ def test_a_part_only_the_target_names_a_place_for_is_clean_not_undeclared(
         "path": str(out / ".agents/skills/example/examples"),
     } in result.report["written"]
     assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_a_target_only_capability_is_judged_by_its_support_not_by_having_a_note(
+    tmp_path: Path,
+) -> None:
+    """A capability only the target names still carries the target's own verdict on it.
+
+    `compare` never carries `skill.frontmatter.deprecated` or `skill.frontmatter.confidential`:
+    the source description does not declare either, so there is no `Gap`. The target's own
+    capabilities do, and say one is unsupported and the other supported -- a documented
+    answer this run must not collapse to "reproduced" (keyed on a `note` being present) or
+    to "unknown" (keyed on one being absent) instead of reading the `support` it was given.
+    """
+    root = tmp_path / "specs"
+    write(
+        root,
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+        ],
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+            {
+                "id": "skill.frontmatter.deprecated",
+                "support": "unsupported",
+                "note": "Antigravity ignores this field entirely.",
+            },
+            {"id": "skill.frontmatter.confidential", "support": "supported"},
+        ],
+        layout=[
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+        ],
+    )
+    folder = skill(tmp_path / "example", "name: example\ndeprecated: true\nconfidential: true\n")
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert properties(result.report)["skill.frontmatter.deprecated"] == (
+        "missing",
+        "extension",
+        "lossy",
+    )
+    assert properties(result.report)["skill.frontmatter.confidential"] == (
+        "reproduced",
+        "extension",
+        "clean",
+    )
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
 
 def test_a_symbolic_link_inside_the_skill_folder_is_carried_as_a_link_and_named(

@@ -30,7 +30,7 @@ import yaml
 
 from agent_skill_adapter.envspec.gaps import Gap, Origin, Outcome, compare
 from agent_skill_adapter.envspec.loader import base_specs, select
-from agent_skill_adapter.envspec.model import EnvSpec
+from agent_skill_adapter.envspec.model import EnvSpec, Support
 
 REPORT_SCHEMA = 1
 """Version of the report format below. A field that changes meaning changes this number."""
@@ -124,13 +124,14 @@ TARGET_ONLY = (
     "no entry with this id in the source description or what it extends; the target "
     "names one anyway, and what it says about it is what this run relies on"
 )
-"""Why a property is clean though `compare` never carried it: the target alone knows it.
+"""Why a property's words come from the target alone, though `compare` never carried it.
 
 `compare` matches only what the *source* declares, by id, within its own list -- so an id
 only the *target*'s capabilities or layout carry never earns a `Gap` at all, and reads as
 `UNDECLARED` unless this is asked of the target directly. It is not the same silence: the
-target has a documented place or word for the entry, and the assembly writes to it in the
-very same run that would otherwise call the entry lossy and undeclared."""
+target has a documented place or word for the entry. That word need not be a clean one --
+a target-only capability the target documents as unsupported is still `MISSING`, exactly as
+a `Gap` would call it."""
 
 _HOW_TO_KEEP_A_HOOK = (
     "Move the rule into the body of the skill: prose the model may disregard is weaker "
@@ -626,7 +627,20 @@ def _kind(entry_id: str, gap: Gap | None) -> str:
     return "hook-event" if entry_id.startswith(EVENT) else ""
 
 
-def _target_alone(target: EnvSpec, entry_id: str) -> str | None:
+_TARGET_ONLY_OUTCOME = {
+    Support.SUPPORTED: Outcome.REPRODUCED,
+    Support.UNSUPPORTED: Outcome.MISSING,
+    Support.UNKNOWN: Outcome.UNKNOWN,
+}
+"""What a target-only capability's own ``support`` means, mirrored from `compare`'s table.
+
+`compare` never carries this entry -- it is asked here, of the target alone -- but once
+asked, the answer follows the same rule `compare` uses for every entry it does carry: the
+target's declared ``support``, not whether it left a ``note``.
+"""
+
+
+def _target_alone(target: EnvSpec, entry_id: str) -> tuple[str | None, Outcome] | None:
     """What the target says about ``entry_id`` on its own, or ``None`` when it names nothing.
 
     `compare` never asks about an id neither the source nor what it extends declares, so an
@@ -634,11 +648,19 @@ def _target_alone(target: EnvSpec, entry_id: str) -> str | None:
     the target's own layout happen to name, say -- reaches `_judge` with no `Gap` at all.
     Asked here, directly of the target, rather than folded into the source-only silence
     `UNDECLARED` speaks for.
+
+    A layout entry carries no `support` of its own -- the target either names a place or does
+    not, which is `compare`'s own rule for layout too -- so finding one is `REPRODUCED`. A
+    capability does carry `support`, and a target that documents the entry as unsupported or
+    unknown said so on its own initiative; that is not weaker for being unasked.
     """
     layout_path = _layout(target, entry_id)
     if layout_path is not None:
-        return layout_path
-    return next((entry.note for entry in target.capabilities if entry.id == entry_id), None)
+        return layout_path, Outcome.REPRODUCED
+    capability = next((entry for entry in target.capabilities if entry.id == entry_id), None)
+    if capability is None:
+        return None
+    return capability.note, _TARGET_ONLY_OUTCOME[capability.support]
 
 
 def _judge(
@@ -669,8 +691,9 @@ def _judge(
             outcome, origin = gap.outcome, gap.origin
             source_says, target_says, note = gap.source_note, gap.target_note, None
         elif target_only is not None:
-            outcome, origin = Outcome.REPRODUCED, Origin.EXTENSION
-            source_says, target_says, note = None, target_only, TARGET_ONLY
+            target_says, outcome = target_only
+            origin = Origin.EXTENSION
+            source_says, note = None, TARGET_ONLY
         else:
             outcome, origin = Outcome.UNKNOWN, Origin.EXTENSION
             source_says, target_says, note = None, None, UNDECLARED
@@ -699,14 +722,21 @@ def _layout(spec: EnvSpec, entry_id: str) -> str | None:
 
 
 def _skill_name(skill_dir: Path) -> str:
-    """The skill's own name, read off the resolved folder rather than the path as spelled.
+    """The skill's own name: the folder's last component as spelled, not as resolved.
 
+    ``skill_dir.name`` is what the caller invoked the skill by -- a symbolic link included,
+    since a link installed under one name (dotfiles-managed skills routinely are) is still
+    that name to everyone who calls it, and resolving it would assemble the skill under the
+    link's target instead, and a loop of links would raise before this ever got to say so.
+
+    Resolved only as a fallback, for the one case the name as spelled cannot answer:
     ``skill_dir.name`` is empty for ``.`` and ``..`` -- the very paths a caller spells that
     way to say "the folder I am standing in" -- and an empty name would expand
     ``<skill-name>`` in a layout path down to nothing, assembling the skill at the skills
-    root instead of inside a folder of its own there.
+    root instead of inside a folder of its own there. ``_resolved`` answers a loop of links
+    met on that fallback with a refusal rather than a traceback.
     """
-    return skill_dir.resolve().name
+    return skill_dir.name or _resolved(skill_dir).name
 
 
 def _destination(template: str, skill_name: str) -> tuple[str, str]:
