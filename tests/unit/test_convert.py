@@ -876,6 +876,41 @@ def test_a_line_only_starting_with_three_dashes_does_not_close_the_frontmatter(
     )
 
 
+def test_a_target_environment_that_is_not_a_path_segment_is_the_descriptions_fault(
+    tmp_path: Path,
+) -> None:
+    """Exit code 3, not 6: the skill is readable, and what is unusable is the description.
+
+    The assembled name is the skill's own name suffixed with the target's `environment`, so
+    an `environment` that is not lowercase-and-hyphens makes a name no folder can be called.
+    Answered with code 6 that reads as "this skill folder could not be read" and sends a
+    person to look at a skill file that is exactly as it should be.
+    """
+    root = tmp_path / "specs"
+    write(
+        root,
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[{"id": "skill.frontmatter.description", "support": "supported"}],
+    )
+    write(
+        root,
+        vendor="google",
+        environment="Anti_Gravity",
+        capabilities=[{"id": "skill.frontmatter.description", "support": "supported"}],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+        ],
+    )
+    folder = skill(tmp_path / "example", "name: example\n")
+
+    result = convert(folder, SOURCE, "google/Anti_Gravity@1.0.0", root=root, allow_stale=True)
+
+    assert (result.verdict, result.exit_code) == (Verdict.UNDECIDABLE, 3)
+    assert "Anti_Gravity" in result.report["error"]
+
+
 def test_a_header_whose_lines_end_in_crlf_closes_where_a_reader_sees_it_close(
     tmp_path: Path,
 ) -> None:

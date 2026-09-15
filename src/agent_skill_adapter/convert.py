@@ -791,7 +791,21 @@ def _assembled_name(name: str, environment: str) -> str:
     becomes a path segment the same way: an oversize name or an ``environment`` that is not
     itself lowercase-and-hyphens is refused rather than truncated, which would silently
     rename a skill someone chose the name of.
+
+    Whose fault it is decides the code, and the two faults are told apart before the two
+    names are joined. An ``environment`` that is not a path segment is the description's:
+    the skill folder is exactly as it should be, and code 6 would send a person to read a
+    skill file with nothing wrong in it. Past that, what is too long is the pair, and the
+    name the caller can do something about is the skill's -- code 6, as for any other name
+    the skill folder gave this run.
     """
+    if not _valid_name(environment):
+        raise ConvertError(
+            f"the target description names its environment {environment!r}, which cannot be "
+            f"part of a folder name -- {NAME_RULE}; the skill is readable, the description "
+            "is what settles nothing",
+            EXIT_CODE[Verdict.UNDECIDABLE],
+        )
     assembled = f"{name}-{environment}"
     if _valid_name(assembled):
         return assembled
