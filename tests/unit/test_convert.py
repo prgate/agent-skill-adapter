@@ -890,6 +890,39 @@ def test_a_symbolic_link_inside_the_skill_folder_is_carried_as_a_link_and_named(
     assert any("symbolic link" in line and "scripts" in line for line in result.report["advice"])
 
 
+def test_a_skill_file_that_is_a_symbolic_link_is_read_and_assembled_whole(
+    tmp_path: Path,
+) -> None:
+    """`SKILL.md` is the one file the whole run reads to grade the skill; it is not carried as
+    a link the way a bundled directory's own link is.
+
+    Carrying it over as a link would stage a link relative to where the skill folder itself
+    sits, almost never resolvable under `out`, while the report still called the run clean
+    and said the file was written -- half an assembled skill mistaken for a whole one. The
+    file this run already read to reach its verdict is written as the bytes it was graded
+    from, not as a pointer back to them.
+    """
+    root = assembly_tree(tmp_path)
+    real = tmp_path / "real"
+    real.mkdir()
+    content = "---\nname: example\ndescription: what it does\n---\n\nBody.\n"
+    (real / "SKILL.md").write_text(content, encoding="utf-8")
+    folder = tmp_path / "example"
+    folder.mkdir()
+    (folder / "SKILL.md").symlink_to(real / "SKILL.md")
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    staged = out / ".agents/skills/example-antigravity/SKILL.md"
+    assert not staged.is_symlink()
+    assert staged.read_text(encoding="utf-8") == content
+    assert not any(
+        "SKILL.md" in line and "symbolic link" in line for line in result.report["advice"]
+    )
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
 def test_an_occupied_destination_stops_the_assembly_and_keeps_what_is_there(
     tmp_path: Path,
 ) -> None:

@@ -1114,6 +1114,14 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
     return value names every link a caller must know is a link, so a run that carries one
     over does not also read as an ordinary, clean copy.
 
+    ``SKILL.md`` is the one exception, because it is not this function's own rule to keep:
+    its bytes are what the whole run was graded on, read straight through a link already by
+    `_frontmatter`. Carrying it over as a link here -- almost always unresolvable, since it
+    would point relative to a folder under ``out`` rather than the one it came from -- would
+    stage a broken pointer behind a verdict computed from real content. It is copied through
+    the link instead, exactly as reading it already was, and is never named among the links
+    the second return value reports.
+
     The order of the three is the order of what they answer for. Leading out of ``out``
     first: that is the one promise this command makes about the caller's filesystem, and a
     plan that breaks it must not be answered with the code for a lesser fault it also has.
@@ -1205,10 +1213,20 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
             started.append(part)
             if part.content is not None:
                 part.staged.write_text(part.content, encoding="utf-8")
-            elif part.copied_from is not None and part.copied_from.is_symlink():
+            elif (
+                part.copied_from is not None
+                and part.copied_from.is_symlink()
+                and part.label != SKILL_MD
+            ):
                 # Checked before `is_dir`, which follows a link to ask about what it points
                 # at rather than the link itself, and would send a link to a directory into
                 # the branch below -- reading through the one thing that must not be read.
+                # `SKILL.md` itself is excepted: its bytes are what the whole run was graded
+                # on, read straight through a link by `_frontmatter` already, so carrying it
+                # as a link here -- almost never resolvable relative to a different folder
+                # under ``out`` -- would stage a broken pointer behind a verdict computed
+                # from real content. It falls through to the plain copy below, which follows
+                # a link exactly as reading it already did.
                 shutil.copy2(part.copied_from, part.staged, follow_symlinks=False)
             elif part.copied_from is not None and part.copied_from.is_dir():
                 shutil.copytree(part.copied_from, part.staged, symlinks=True)
@@ -1238,7 +1256,7 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
     links = [
         line
         for part in parts
-        if part.copied_from is not None
+        if part.copied_from is not None and part.label != SKILL_MD
         for line in _links_within(part.copied_from, part.label)
     ]
     return written, links
