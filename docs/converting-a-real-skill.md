@@ -86,12 +86,18 @@ uv run agent-skill-adapter convert ~/.claude/skills/pr-review … --out /tmp/out
   clean        skill.frontmatter.metadata -- frontmatter key `metadata` (out-of-scope, specification)
   lossy        skill.dir..omc -- bundled directory `.omc/` (unknown, extension); no entry with this id in either description
   undecidable  skill.dir.references -- bundled directory `references/` (unknown, specification)
-  lossy        skill.dir.resources -- bundled directory `resources/` (unknown, extension); no entry with this id in either description
+  clean        skill.dir.resources -- bundled directory `resources/` (reproduced, extension); no entry with this id in the source description or what it extends; the target names one anyway, and what it says about it is what this run relies on
   clean        skill.dir.scripts -- bundled directory `scripts/` (reproduced, specification)
   lossy        skill.top.CHANGELOG.md -- top-level file `CHANGELOG.md` (unknown, extension); no entry with this id in either description
   lossy        skill.top.README.md -- top-level file `README.md` (unknown, extension); no entry with this id in either description
   lossy        skill.top.config.md -- top-level file `config.md` (unknown, extension); no entry with this id in either description
   lossy        skill.top.diagram.svg -- top-level file `diagram.svg` (unknown, extension); no entry with this id in either description
+  advice: `.omc/` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
+  advice: `references/` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
+  advice: `CHANGELOG.md` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
+  advice: `README.md` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
+  advice: `config.md` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
+  advice: `diagram.svg` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
 ```
 
 `/tmp/out` was never created. One line decides it: `references/` is a directory the open
@@ -100,11 +106,13 @@ documentation says nothing about that directory. Silence from an implementer of 
 about a part of that format is not a denial and not a promise — it is a hole in someone
 else's documentation, and guessing across it is what this tool exists not to do.
 
-This is a deliberate outcome, not a defect to be patched here. Antigravity names `examples/`
-and `resources/` where the specification names `references/` and `assets/`; pairing them is a
-translation rule (FR-6), a separate piece of work with its own decisions. Until it exists, a
-skill with a `references/` folder stops at exit code 3, and the report says which line
-stopped it.
+`resources/` is not the same kind of gap, and the row says so: `compare` matches only what
+the *source* description declares, by id, so a directory named for an id only the *target*'s
+own layout carries -- Antigravity names a place for `resources/` by that literal name, and
+neither Claude Code nor the open specification it extends mentions the directory at all --
+never earned a `Gap` there, and used to read as though nobody had heard of it while the very
+same run copied it to the path Antigravity names. `references/` has no such place in either
+description: it stops the run at exit code 3, and the report says which line stopped it.
 
 The four `skill.top.*` lines are the other half of the same rule. `CHANGELOG.md`,
 `README.md`, `config.md` and `diagram.svg` sit at the top of the skill folder beside
