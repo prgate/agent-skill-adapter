@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import codecs
 import json
+import os.path
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -364,6 +365,33 @@ def _depth(value: Any) -> int:
     return deepest
 
 
+def _as_spelled(key: Any) -> str:
+    """The key as the header writes it, asked of `yaml` rather than printed as a Python value.
+
+    A `repr` would name the type -- `datetime.date(2026, 9, 14)` -- which is a string the
+    file does not contain, and this module names a value by what it reads as and never by
+    its type. Dumped back into YAML, a key comes out the way it is written there: bare where
+    the format reads it as a date or a number, quoted where it is text. That quoting is the
+    whole of the difference between two keys that collapse into one, so it is the difference
+    a person is shown.
+    """
+    return yaml.safe_dump(key, default_flow_style=True).removesuffix("...\n").strip()
+
+
+def _as_written(key: Any) -> str:
+    """The text a key ends up as in what this run writes, asked of `json` and not guessed.
+
+    Two keys that differ here are two keys in the result; two that agree are one key in it,
+    whatever they were in the file. Asking by dumping and reading back rather than by a
+    table of pairs, because the rules for spelling a key belong to the format and not to us:
+    a date and the quoted text of it collapse here, and so do `1` and `"1"`, `true` and
+    `"true"`, `null` and `"null"` -- and so will whatever else the format decides to spell
+    the same way, without a line added here. A key that is unwritable never reaches this:
+    `_portable` refuses it above, which is what leaves only keys `json` can hold.
+    """
+    return str(next(iter(json.loads(json.dumps({key: 0})))))
+
+
 def _portable(value: Any, where: str, path: Path, rewritten: list[str]) -> Any:
     """``value`` as something JSON holds, and a line for every value that had to change.
 
@@ -379,12 +407,31 @@ def _portable(value: Any, where: str, path: Path, rewritten: list[str]) -> Any:
     string, and `json.dumps` refuses a date one whatever is done about its values.
     """
     if isinstance(value, Mapping):
-        return {
-            _portable(key, f"{where}.{key}", path, rewritten): _portable(
-                item, f"{where}.{key}", path, rewritten
-            )
-            for key, item in value.items()
-        }
+        # Gathered key by key into a mapping of its own rather than built as a comprehension:
+        # two keys that differ in the file can end up as one in what this run writes, and a
+        # comprehension would keep the last of them without a word. That silence is what
+        # `_StrictLoader` refuses a key declared twice for, and this is the same duplicate,
+        # made by carrying the header across rather than by the person who wrote it. Which
+        # keys those are is `_as_written`, asked of the format rather than listed here: where
+        # the collapse happens on the way is our business and not the reader's -- the value
+        # is gone either way.
+        carried: dict[Any, Any] = {}
+        spelled: dict[str, Any] = {}
+        for key, item in value.items():
+            inside = f"{where}.{key}"
+            name = _portable(key, inside, path, rewritten)
+            written = _as_written(name)
+            if written in spelled:
+                raise ConvertError(
+                    f"{path}: `{where}` declares {_as_spelled(spelled[written])} and "
+                    f"{_as_spelled(key)}, which are two keys in the file and the one key "
+                    f"`{written}` in what this run writes; the value of the first would be "
+                    "dropped here without a word. Quote one of them, or remove it",
+                    UNREADABLE,
+                )
+            spelled[written] = key
+            carried[name] = _portable(item, inside, path, rewritten)
+        return carried
     if isinstance(value, list):
         return [
             _portable(item, f"{where}[{index}]", path, rewritten)
@@ -656,12 +703,59 @@ def _plan(
     scope: Scope,
     properties: Sequence[Property],
     hooks: Mapping[str, Any],
+    *,
+    root: str,
 ) -> tuple[list[_Part], list[str]]:
-    """What the assembly will write, before it writes anything, and what it asks of a person.
+    """What the assembly will write, and what it asks of a person once it has.
 
-    A part the target description names no path for is not assembled: guessing where it
-    goes would be inventing the target environment's layout. It keeps its row in the
-    report, which is where its fate is read.
+    ``root`` is where a skill of the target environment lives, as `_skills_root` read it off
+    the layout -- and refused the run when the layout named nowhere, which is why there is
+    always one here.
+
+    A part the target description names no path for is not assembled: guessing where it goes
+    would be inventing the target environment's layout. It keeps its row in the report, and
+    `_left_behind` says it was left behind -- from the layout alone, whether or not anybody
+    asked for this plan, because that is a price the descriptions settle between them.
+    """
+    parts = []
+    for label, inside in _places(target, properties):
+        # The other half of the same list: what has a place is written, what has none is
+        # named by `_left_behind`. Neither side decides for itself which half a part is in,
+        # or a part could end up written and called left behind, or in neither list.
+        if inside is None:
+            continue
+        where, staged = _destination(f"{root.rstrip('/')}/{inside}", skill_dir.name)
+        parts.append(_Part(label, where, _under(out, staged), copied_from=skill_dir / label))
+    carried, hooks_file = _hook_place(target, scope, properties, hooks)
+    if not carried or hooks_file is None:
+        return parts, []
+    hook_part = _hook_part(out, hooks_file, carried)
+    return [*parts, hook_part], [
+        f"the hook entry is staged at {hook_part.staged} and not merged into "
+        f"{hook_part.destination}: that file belongs to the whole target environment and "
+        "may already hold entries of its own, so add this one to it yourself",
+    ]
+
+
+def _under(out: Path, staged: str) -> Path:
+    """One staged path, with every ``..`` in it collapsed before anything is done with it.
+
+    Lexically, by text, and deliberately: what is worked out here is what the checks are made
+    about, what the bytes are written to and what the report calls the place they are in. Left
+    for the operating system to work out at the last moment, those three could differ -- the
+    report would name a path that leads to the file only once somebody else has read the
+    ``..``, and the checks would have been made about a place nothing was written to.
+    """
+    return Path(os.path.normpath(out / staged))
+
+
+def _skills_root(target: EnvSpec, scope: Scope) -> str:
+    """Where a skill of the target environment lives, or the refusal that there is nowhere.
+
+    Asked whether or not the caller wants the bytes written: that a target names no place for
+    a skill file is read off its layout like everything else here, so the answer -- and the
+    exit code -- cannot depend on `--out`. It is not a part left behind either, and the code
+    says which: nothing is known about where any of this skill goes, which is `undecidable`.
     """
     root = _layout(target, SKILLS_ROOT[scope])
     if root is None or _layout(target, SKILL_FILE) is None:
@@ -670,68 +764,116 @@ def _plan(
             f"{scope.value} level, so there is nowhere to assemble into",
             EXIT_CODE[Verdict.UNDECIDABLE],
         )
+    return root
+
+
+def _places(target: EnvSpec, properties: Sequence[Property]) -> list[tuple[str, str | None]]:
+    """Every part of the skill folder and the path the target names for it, ``None`` for none.
+
+    The one place that question is answered. It is asked from two sides -- by what is written
+    and by what is said to have stayed behind -- and two spellings of it could drift apart on
+    the next entry id somebody adds, leaving a part written and called left behind, or written
+    and never mentioned. That is the silent disappearance this whole module is written against.
+    """
+    return [(label, _layout(target, entry_id)) for entry_id, label in _wanted(properties)]
+
+
+def _hook_place(
+    target: EnvSpec, scope: Scope, properties: Sequence[Property], hooks: Mapping[str, Any]
+) -> tuple[dict[str, Any], str | None]:
+    """The hooks to carry over, and the file the target registers hooks in -- both or neither.
+
+    One answer for the same two sides, for the same reason as `_places`: a hook with nowhere
+    to go is named, one with a place is written, and nothing decides that twice.
+    """
+    return _hooks_the_target_fires(properties, hooks), _layout(target, HOOKS_FILE[scope])
+
+
+def _wanted(properties: Sequence[Property]) -> list[tuple[str, str]]:
+    """Every part of the skill folder to place: the id that names its path in the layout of
+    an environment, and the name it goes by inside the folder.
+
+    A file beside the skill file is asked about exactly as a bundled directory is. Left out
+    of this list it would be left out of what is said about parts with nowhere to go as
+    well, and a `README.md` nobody has a place for would go unmentioned while a directory in
+    the same position is named.
+    """
     wanted = [(SKILL_FILE, SKILL_MD)]
     wanted += [
         (entry.id, f"{entry.id[len(DIRECTORY) :]}/")
         for entry in properties
         if entry.id.startswith(DIRECTORY)
     ]
-    # A file beside the skill file is asked about exactly as a bundled directory is. Left out
-    # of this list it would be left out of the line below as well, and a `README.md` nobody
-    # has a place for would go unmentioned while a directory in the same position is named.
-    wanted += [(entry.id, entry.id[len(TOP) :]) for entry in properties if entry.id.startswith(TOP)]
-    parts = []
-    homeless = []
-    for entry_id, label in wanted:
-        inside = _layout(target, entry_id)
-        if inside is None:
-            homeless.append(label)
-            continue
-        destination, staged = _destination(f"{root.rstrip('/')}/{inside}", skill_dir.name)
-        parts.append(_Part(label, destination, out / staged, copied_from=skill_dir / label))
-    # Said out loud, because the list of what was written cannot say it: a part missing from
-    # it looks the same whether the run had nowhere to put it or never got that far.
-    asked = [
+    return wanted + [
+        (entry.id, entry.id[len(TOP) :]) for entry in properties if entry.id.startswith(TOP)
+    ]
+
+
+def _left_behind(
+    target: EnvSpec, scope: Scope, properties: Sequence[Property], hooks: Mapping[str, Any]
+) -> list[str]:
+    """What the target description names no place for, in the words the report says it in.
+
+    Read off the layout of the target and nothing else: no ``out``, no filesystem. What the
+    transfer costs is settled by the two descriptions and the skill folder, so asking for the
+    bytes cannot change it -- ``--out`` decides what is written, not what is lost. Said out
+    loud, too, because the list of what was written cannot say it: a part missing from that
+    list looks the same whether the run had nowhere to put it or never got that far.
+
+    The skill file cannot turn up here: a target that names no place for one has nowhere to
+    assemble into at all, and `_skills_root` has refused the run before this is asked -- that
+    is the whole skill with nowhere to go, not one part of it left behind while the rest
+    crosses, and it carries the other code.
+    """
+    lines = [
         f"`{label}` stayed in the skill folder: {target.vendor}/{target.environment} names "
         "no place for it, and a place picked for it here would be a guess about a layout "
         "only that environment's documentation can settle"
-        for label in homeless
+        for label, inside in _places(target, properties)
+        if inside is None
     ]
-    hook_part = _hook_part(out, target, scope, properties, hooks)
-    if hook_part is None:
-        return parts, asked
-    return parts + [hook_part], [
-        *asked,
-        f"the hook entry is staged at {hook_part.staged} and not merged into "
-        f"{hook_part.destination}: that file belongs to the whole target environment and may "
-        "already hold entries of its own, so add this one to it yourself",
-    ]
+    # The one thing that can be reproduced in full and still have nowhere to go: the event a
+    # hook fires on is a capability, and the file the environment registers a hook in is a
+    # layout entry it owes nothing about for having declared the event. The header itself
+    # crosses -- `SKILL.md` is copied whole, `hooks:` and all -- so what is lost is not the
+    # text of the declaration but the only place the environment would have read it from.
+    carried, hooks_file = _hook_place(target, scope, properties, hooks)
+    if carried and hooks_file is None:
+        lines.append(
+            f"the `{HOOKS_KEY}` key crosses inside {SKILL_MD} and is registered nowhere: "
+            f"{target.vendor}/{target.environment} names no file for hook entries, and that "
+            "file is where a declaration becomes a hook -- what arrives in the target is the "
+            "text of the rule, in a header nothing reads it from"
+        )
+    return lines
 
 
-def _hook_part(
-    out: Path,
-    target: EnvSpec,
-    scope: Scope,
-    properties: Sequence[Property],
-    hooks: Mapping[str, Any],
-) -> _Part | None:
-    """The hook entry to carry over: the declared events the target fires, and nothing else.
+def _hooks_the_target_fires(
+    properties: Sequence[Property], hooks: Mapping[str, Any]
+) -> dict[str, Any]:
+    """The declared hooks whose event the target reproduces, and nothing else.
 
     An event the target does not reproduce is left out of the file -- written there it would
     read as a guarantee the target never gave. It keeps its row in the report either way.
     """
     fires = {entry.id for entry in properties if entry.verdict is Verdict.CLEAN}
-    carried = {name: value for name, value in hooks.items() if f"{EVENT}{name}" in fires}
-    destination = _layout(target, HOOKS_FILE[scope])
-    if not carried or destination is None:
-        return None
+    return {name: value for name, value in hooks.items() if f"{EVENT}{name}" in fires}
+
+
+def _hook_part(out: Path, destination: str, carried: Mapping[str, Any]) -> _Part:
+    """The hook entry to carry over, ready to be staged beside the assembled skill.
+
+    Whether there is anything to carry and whether the target names a file to carry it into
+    are asked before this, by the plan: a hook with nowhere to go is not a part to write but
+    a part left behind, and the two answers must not both arrive here as one ``None``.
+    """
     return _Part(
         f"frontmatter key `{HOOKS_KEY}`",
         destination,
         # The entry is staged beside the assembled skill under the name the target gives the
         # file it belongs in, never at the destination itself: merging into a file that may
         # already hold someone else's entries is FR-40.
-        out / Path(destination).name,
+        _under(out, Path(destination).name),
         # No rescue argument here, and none needed: every value came through `_portable`,
         # which is where a header meets JSON. A date is already the text ISO 8601 spells,
         # and a shape with no stable text never got this far -- the file was refused as it
@@ -739,6 +881,35 @@ def _hook_part(
         # `str()` makes of it, unannounced and differently on every run.
         content=json.dumps({HOOKS_KEY: carried}, indent=2, ensure_ascii=False) + "\n",
     )
+
+
+def _links_on_the_way(out: Path, staged: Path) -> None:
+    """Refuse a symbolic link at any level of ``staged`` below ``out``, the last one included.
+
+    Every level, because every one of them is a door out: `mkdir(parents=True,
+    exist_ok=True)` walks through a link in the middle of a path without a word, and a copy
+    at the end follows one, so a link anywhere below `out` puts the bytes where it points.
+    Asked here rather than with the checks over the whole plan, so that the answer is as
+    fresh as it can be: what is asked of a path and what is then done to it are two moments,
+    and the shorter the gap the less of it another process can use.
+    """
+    # ponytail: the window is narrowed, not closed. Between this question and the operation
+    # it clears, a concurrent writer can still replace a level with a link, and no amount of
+    # asking beforehand changes that. Closing it means the operations themselves refusing to
+    # follow links -- `O_NOFOLLOW` and `dir_fd` down every level of the path -- which is the
+    # path sandbox of FR-14, deferred twice by the user and a block of work of its own.
+    below = [
+        level for level in reversed(staged.parents) if level != out and level.is_relative_to(out)
+    ]
+    for level in [*below, staged]:
+        if level.is_symlink():
+            raise ConvertError(
+                f"{level} is a symbolic link, and no level of a destination is written "
+                f"through one: the bytes would go where the link points rather than under "
+                f"{out}, which is the one promise this command makes about the caller's "
+                "filesystem",
+                UNWRITABLE,
+            )
 
 
 def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
@@ -752,22 +923,32 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
     A symbolic link counts as an occupied place even when it points at nothing: ``exists``
     answers ``False`` for a broken one, and writing to it would create its target somewhere
     the caller never named.
+
+    The order of the three is the order of what they answer for. Leading out of ``out``
+    first: that is the one promise this command makes about the caller's filesystem, and a
+    plan that breaks it must not be answered with the code for a lesser fault it also has.
+    Then the plan against itself, then the plan against what is already on disk.
     """
-    taken = [str(part.staged) for part in parts if part.staged.exists() or part.staged.is_symlink()]
-    if taken:
-        raise ConvertError(
-            "there is already something at " + ", ".join(taken) + "; nothing was written, "
-            "because a converted skill that silently replaced a result of an earlier run "
-            "is indistinguishable from one that was never converted",
-            COLLISION,
-        )
-    # `resolve` normalises `..` and follows links, so the three ways a destination can lead
-    # out of `out` -- a layout path that is absolute, a skill folder named `..`, a link on
-    # the way -- are one question asked once.
-    # ponytail: checked and then written as two steps, so a link planted in between is not
-    # caught; closing that needs writes that refuse to follow links (FR-14, path sandboxing).
+    # The four ways a destination can lead out of `out` -- a layout path that is absolute, a
+    # `..` anywhere along the way, a `..` as the last step, a link on the way -- are one
+    # question asked once: `resolve` answers for everything above the last name and
+    # `normpath` for the last name itself.
+    # Over the whole plan, and answered again level by level in `_links_on_the_way` before
+    # each part is written: this one rules out a destination that leads out of `out` at all,
+    # that one rules out the path having changed since.
     root = out.resolve()
-    outside = [str(part.staged) for part in parts if not part.staged.resolve().is_relative_to(root)]
+    # The parent resolved and the last name left as written: what this asks is where the file
+    # would be created. A link at the destination itself is not a way out of `out` but an
+    # occupied place, and the check below answers for it with the code for that; resolving it
+    # here would have the run report a broken promise where the promise was never reached.
+    # `normpath` then settles what that last name means without going near the filesystem: a
+    # `..` written there is a step back out, not a name to create, and left as text it would
+    # read as a path under `out`.
+    places = [
+        (part, Path(os.path.normpath(part.staged.parent.resolve() / part.staged.name)))
+        for part in parts
+    ]
+    outside = [str(part.staged) for part, place in places if not place.is_relative_to(root)]
     if outside:
         raise ConvertError(
             ", ".join(outside) + f" is not under {out}; nothing was written, because the one "
@@ -779,9 +960,57 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
             # overwrite the answer the assembly table had already computed.
             UNWRITABLE,
         )
+    # `out` is the folder the result is assembled in, so it is never a place for one part of
+    # that result: a destination that collapses onto it would replace what the caller named
+    # -- a folder turned into a file or a bundle -- while the list of what was written called
+    # that a part carried over. The same code as a destination outside `out`, and the same
+    # reason: the fault is in the plan, and what the skill costs to transfer is untouched by
+    # it. Not the code for an occupied place, which would make the answer depend on whether
+    # `out` happens to exist yet -- met as an empty name it would be written straight through.
+    onto = [str(part.staged) for part, place in places if place == root]
+    if onto:
+        raise ConvertError(
+            ", ".join(onto) + f" is {out} itself, the folder this run was told to assemble "
+            "into; nothing was written, because a part of a skill put there would replace "
+            "the folder the caller named with one piece of what was supposed to go inside it",
+            UNWRITABLE,
+        )
+    # The plan against itself, and apart from the plan against what is already there: a
+    # description keeps its `id` unique and promises nothing about its `path`, so a target
+    # may give two entries one destination. Two parts of one plan meeting there is ours to
+    # notice -- the second write lands on the first, and `written` reports both as carried
+    # over, which is a run saying it moved a file to where another file is.
+    # ponytail: every part against every other, which is a handful against a handful. The way
+    # up, if a plan ever grows, is to sort the destinations and compare each with the one
+    # before it, where containment can only be with the neighbour.
+    planned: dict[Path, str] = {}
+    for part in parts:
+        for place, label in planned.items():
+            if place.is_relative_to(part.staged) or part.staged.is_relative_to(place):
+                raise ConvertError(
+                    f"`{label}` is to be written at {place} and `{part.label}` at "
+                    f"{part.staged}, which is the same place or one inside the other; "
+                    "nothing was written, because whichever of the two went second would "
+                    "replace the other while the report called both of them carried over",
+                    COLLISION,
+                )
+        planned[part.staged] = part.label
+    taken = [str(part.staged) for part in parts if part.staged.exists() or part.staged.is_symlink()]
+    if taken:
+        raise ConvertError(
+            "there is already something at " + ", ".join(taken) + "; nothing was written, "
+            "because a converted skill that silently replaced a result of an earlier run "
+            "is indistinguishable from one that was never converted",
+            COLLISION,
+        )
     started: list[_Part] = []
     try:
         for part in parts:
+            # Immediately before this part is written, and once per part: the checks above
+            # answered for the plan as a whole, and a path is only as checked as it is fresh.
+            # Before `started` grows, so that a refusal here takes back what this run wrote
+            # and never the link it refused to write through.
+            _links_on_the_way(out, part.staged)
             part.staged.parent.mkdir(parents=True, exist_ok=True)
             started.append(part)
             if part.content is not None:
@@ -790,11 +1019,11 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> list[dict[str, str]]:
                 shutil.copytree(part.copied_from, part.staged)
             elif part.copied_from is not None:
                 shutil.copy2(part.copied_from, part.staged)
-    except OSError as error:
-        # Whatever the filesystem refused -- a link pointing nowhere inside a bundle, a full
-        # disk -- this run takes back what it had put there, because half an assembled skill
-        # is indistinguishable from a whole one. Only what it wrote: every one of these
-        # places was free, which is what the check above established.
+    except (OSError, ConvertError) as error:
+        # Whatever stopped the writing -- a link on the way to a destination, a link pointing
+        # nowhere inside a bundle, a full disk -- this run takes back what it had put there,
+        # because half an assembled skill is indistinguishable from a whole one. Only what it
+        # wrote: every one of these places was free, which is what the check above established.
         for part in started:
             if part.staged.is_dir() and not part.staged.is_symlink():
                 shutil.rmtree(part.staged, ignore_errors=True)
@@ -982,21 +1211,33 @@ def convert(
         side = UNREADABLE
         findings, front, rewritten = _findings(skill_dir)
         properties, advice = _judge(findings, gaps)
+        declared = front.get(HOOKS_KEY)
+        hooks = declared if isinstance(declared, Mapping) else {}
+        # Both asked before the branch below and not inside it: whether the target names a
+        # place -- for the skill as a whole, and then for each part of it -- is read off its
+        # layout, so the answer is the same whether or not the caller asked for the bytes.
+        # Inside the branch, `--out` would decide what the transfer is said to cost, and the
+        # same skill on the same pair of descriptions would answer two different things
+        # about itself. The ground first: with nowhere to put a skill file there is nothing
+        # to say about the parts of one, and `_skills_root` refuses the run rather than
+        # answer. It is read here and used below, so that the line cannot be mistaken for a
+        # value nobody wanted and removed as one -- taking the refusal with it.
+        ground = _skills_root(target_spec, scope)
+        stayed = _left_behind(target_spec, scope, properties, hooks)
         # First, because they happened first: a value was rewritten while the header was
         # being read, before anything was judged about it.
-        advice = [*rewritten, *advice]
+        advice = [*rewritten, *advice, *stayed]
         verdict = worst(entry.verdict for entry in properties)
+        # A part with nowhere to go did not cross, whatever its row says about being
+        # reproduced: exit code 0 on a run that left one behind would be this command
+        # telling a caller there is nothing here to look at.
+        if stayed:
+            verdict = worst([verdict, Verdict.LOSSY])
         # An undecidable run assembles nothing: the transferable half of a skill whose other
         # half nobody documented is a folder that looks converted and is not.
         if out is not None and verdict is not Verdict.UNDECIDABLE:
-            declared = front.get(HOOKS_KEY)
             parts, asked = _plan(
-                skill_dir,
-                Path(out),
-                target_spec,
-                scope,
-                properties,
-                declared if isinstance(declared, Mapping) else {},
+                skill_dir, Path(out), target_spec, scope, properties, hooks, root=ground
             )
             written = _assemble(Path(out), parts)
             advice += asked

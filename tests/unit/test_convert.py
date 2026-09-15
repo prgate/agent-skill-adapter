@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -119,7 +120,14 @@ def four_row_tree(tmp_path: Path) -> Path:
             {"id": "skill.frontmatter.description", "support": "supported"},
             {"id": "skill.frontmatter.deprecated", "support": "unsupported"},
         ],
-        layout=[{"id": "skill.dir.scripts", "path": "<skill-name>/scripts/"}],
+        # A place for a skill file, because a target that names none has nowhere to assemble
+        # into at all -- which is its own refusal, in either mode, and not what these four
+        # rows are about.
+        layout=[
+            {"id": "skill.dir.scripts", "path": "<skill-name>/scripts/"},
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+        ],
     )
     return root
 
@@ -205,6 +213,10 @@ BROKEN: dict[str, bytes | None] = {
     "unclosed-frontmatter": b"---\nname: example\n\nBody, and no closing line.\n",
     "invalid-yaml": b"---\nname: [unclosed\n---\n\nBody.\n",
     "duplicate-key": b"---\nname: one\nname: two\ndescription: what it does\n---\n\nBody.\n",
+    "duplicate-normalized-key": b"---\ndescription: what it does\nhooks:\n  PreToolUse:\n"
+    b"    2026-09-14: from-date-key\n    '2026-09-14': from-string-key\n---\n\nBody.\n",
+    "duplicate-written-key": b"---\ndescription: what it does\nhooks:\n  PreToolUse:\n"
+    b"    1: from-int-key\n    '1': from-string-key\n---\n\nBody.\n",
     "unhashable-key": b"---\ndescription: what it does\n? [a, b]\n: v\n---\n\nBody.\n",
     "unstable-set": b"---\ndescription: what it does\nhooks: !!set {alpha, beta}\n---\n\nBody.\n",
     "unstable-bytes": b"---\ndescription: what it does\nseed: !!binary aGk=\n---\n\nBody.\n",
@@ -222,7 +234,7 @@ BROKEN: dict[str, bytes | None] = {
     "file-too-large": b"---\nname: example\ndescription: what it does\n---\n\n"
     + b"x" * 1024 * 1024,
 }
-"""Nineteen ways a skill file is not one. Each must stop the run rather than be read halfway.
+"""Twenty-one ways a skill file is not one. Each must stop the run rather than be read halfway.
 
 A set and a block of bytes are here because neither has a text it always reads back as: the
 same header would put different bytes in the assembled file on every run, and a converter
@@ -240,7 +252,9 @@ def test_a_folder_that_is_not_a_skill_stops_the_run_and_still_reports(
     """Exit code 6, no properties, and a report that names the file it could not read.
 
     A duplicate key is here because PyYAML keeps the last of the two without a word: read
-    and not refused, the frontmatter would convert as a value nobody chose. An anchor and
+    and not refused, the frontmatter would convert as a value nobody chose. Two keys that
+    become one only once the header is carried across are the same duplicate, made by this
+    command rather than by the person, and are refused the same way. An anchor and
     its alias are the same defect in another spelling -- what a reader sees in the file and
     what the parser builds stop being the same text (FR-15). A header without `description`
     is a missing required field, which FR-16 counts as a structural break and not as an
@@ -260,6 +274,34 @@ def test_a_folder_that_is_not_a_skill_stops_the_run_and_still_reports(
     assert result.report["properties"] == []
     assert result.report["report_schema"] == 1
     assert str(folder) in result.report["error"]
+
+
+def test_two_header_keys_that_carry_across_as_one_are_both_named(tmp_path: Path) -> None:
+    """A date key and the quoted text of it are two keys in the file and one after carrying.
+
+    Whichever of the two values is dropped, dropping it silently is the failure this command
+    exists to prevent, so the run stops. The message names the place inside the header and
+    both keys as they are written there: "a key was lost" is nothing a person can act on
+    without knowing which, and the two read the same once either is a plain string.
+    """
+    root = four_row_tree(tmp_path)
+    folder = skill(
+        tmp_path / "example",
+        "hooks:\n  PreToolUse:\n    2026-09-14: from-date-key\n    '2026-09-14': from-string-key\n",
+    )
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+
+    error = result.report["error"]
+
+    assert result.exit_code == 6
+    assert "frontmatter.hooks.PreToolUse" in error
+    # As the header writes them: the date bare, the text quoted. A Python `repr` would name
+    # the type instead -- `datetime.date(2026, 9, 14)` -- which is a string the file does not
+    # contain, and this module refuses to name a value by its type twenty lines further down.
+    assert re.search(r"(?<!['\w])2026-09-14(?!['\w])", error)
+    assert "'2026-09-14'" in error
+    assert "datetime" not in error
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 000 does not stop root from reading")
@@ -536,6 +578,43 @@ def test_an_occupied_destination_stops_the_assembly_and_keeps_what_is_there(
     assert result.report["error"]
 
 
+def test_two_parts_of_one_plan_aimed_at_one_destination_stop_it_before_the_first_write(
+    tmp_path: Path,
+) -> None:
+    """Exit code 8, nothing under `out`, and neither file reported as written.
+
+    A description keeps its `id` unique and says nothing about `path`, so a target may
+    legitimately give two entries the same destination; noticing that the plan then writes
+    twice to one place is this command's work. Left alone, the second copy lands on the
+    first and `written` reports both as carried over -- a report saying a file arrived
+    where another file is.
+    """
+    root = four_row_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[{"id": "skill.frontmatter.name", "support": "supported"}],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skill.top.README.md", "path": "<skill-name>/doc.md"},
+            {"id": "skill.top.NOTES.md", "path": "<skill-name>/doc.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+        ],
+    )
+    folder = skill(tmp_path / "example", "name: example\n")
+    (folder / "README.md").write_text("read me\n", encoding="utf-8")
+    (folder / "NOTES.md").write_text("notes\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assert result.exit_code == 8
+    assert result.report["written"] == []
+    assert not out.exists()
+    assert result.report["error"]
+
+
 def test_a_copy_that_fails_part_way_leaves_no_half_assembled_skill(tmp_path: Path) -> None:
     """A link to nothing inside a bundle: exit code 7, a report, and an empty `--out`.
 
@@ -620,6 +699,210 @@ def test_only_a_hook_the_target_fires_is_staged_and_the_report_says_where_it_bel
         "path": str(staged),
     } in result.report["written"]
     assert any(".agents/hooks.json" in line for line in result.report["advice"])
+
+
+def test_a_hook_the_target_fires_and_names_no_file_for_is_not_dropped_in_silence(
+    tmp_path: Path,
+) -> None:
+    """Nothing else is lost here, so exit code 0 is what the run would give -- on a lost hook.
+
+    A hook is the one thing a target can reproduce and still have nowhere to put: the event
+    is a capability and the file a hook is written in is a layout entry, and a description
+    that declares the first owes nothing about the second. A bundled directory with no place
+    gets a line saying it stayed behind; the declaration gets the same line, and a code that
+    is not the one for a skill that transferred whole.
+    """
+    root = hooks_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+            {"id": "skill.frontmatter.hooks", "support": "supported"},
+            {"id": "hook.event.PreToolUse", "kind": "hook-event", "support": "supported"},
+            {"id": "hook.decision.block", "kind": "hook-decision", "support": "supported"},
+        ],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+        ],
+    )
+    folder = skill(tmp_path / "example", "name: example\nhooks:\n  PreToolUse:\n    - guard.sh\n")
+    out = tmp_path / "out"
+
+    reported = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+    assembled = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    # The same skill and the same two descriptions, asked twice: one run was asked for the
+    # bytes and the other only for the answer. Whether a part has a place is read off the
+    # layout of the target, so both runs know it, and a flag that changes what is written
+    # must not change what the transfer is said to cost.
+    assert (reported.verdict, reported.exit_code) == (assembled.verdict, assembled.exit_code)
+    assert (reported.verdict, reported.exit_code) == (Verdict.LOSSY, 1)
+    assert not (out / "hooks.json").exists()
+    assert any("`hooks`" in line for line in reported.report["advice"])
+
+
+def test_a_target_with_nowhere_to_put_a_skill_answers_the_same_either_way(tmp_path: Path) -> None:
+    """No place for a skill file is no place whether or not the bytes were asked for.
+
+    Nothing about this skill is lost in the transfer -- both its keys are reproduced -- so
+    the run would otherwise be clean. What is not known is where any of it goes, and that is
+    read off the layout of the target, not off the filesystem: a report-only run that
+    answered `clean` here would be saying the descriptions settle something they do not.
+    """
+    root = four_row_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+        ],
+        layout=[{"id": "skill.dir.scripts", "path": "<skill-name>/scripts/"}],
+    )
+    folder = skill(tmp_path / "example", "name: example\n")
+
+    reported = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+    assembled = convert(folder, SOURCE, TARGET, root=root, out=tmp_path / "out", allow_stale=True)
+
+    assert (reported.verdict, reported.exit_code) == (assembled.verdict, assembled.exit_code)
+    assert (reported.verdict, reported.exit_code) == (Verdict.UNDECIDABLE, 3)
+    assert reported.report["error"]
+
+
+def test_the_report_names_the_place_the_bytes_are(tmp_path: Path) -> None:
+    """A `..` in a layout path that stays under `out`: the report names where the file is.
+
+    `written` is what a caller reads to find what this run produced, and a path that leads
+    to the file only once an operating system has worked out what the `..` meant is not that
+    -- it is the path the run held before it knew. The bytes go to the place the checks were
+    made about, and that place is what is reported.
+    """
+    root = four_row_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+        ],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/../SKILL.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+        ],
+    )
+    folder = skill(tmp_path / "example", "name: example\n")
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    written = result.report["written"][0]["path"]
+    assert written == str(out / ".agents/skills/SKILL.md")
+    assert Path(written).is_file()
+
+
+@pytest.mark.parametrize("already_there", [True, False])
+def test_a_destination_that_collapses_onto_out_is_refused_either_way(
+    tmp_path: Path, already_there: bool
+) -> None:
+    """`out` is the folder a result is assembled in, and never one part of that result.
+
+    Answered before anything on disk is looked at, because the fault is in the plan and not
+    in what happens to be there: met as an empty name, `out` would be replaced by whichever
+    part landed on it -- the folder the caller named turned into a file -- and the run would
+    report that as a part carried over.
+    """
+    root = four_row_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+        ],
+        layout=[
+            {"id": "skill.file", "path": ".."},
+            {"id": "skills.project", "path": "<workspace-root>/x/"},
+        ],
+    )
+    folder = skill(tmp_path / "example", "name: example\n")
+    out = tmp_path / "out"
+    if already_there:
+        out.mkdir()
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assert result.exit_code == 7
+    assert result.report["written"] == []
+    assert not out.is_file()
+
+
+def test_a_destination_whose_last_step_climbs_out_of_out_is_refused(tmp_path: Path) -> None:
+    """`out/..` is the folder above `out`, and a step back is not a name to write under.
+
+    The check resolves the parent and keeps the last name as written, so that a link at the
+    destination stays an occupied place rather than an escape. A `..` in that position is
+    not a name but a step, and read as a name it would pass for a path under `out` -- and be
+    answered, one check later, as a place that is merely taken.
+    """
+    root = four_row_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[{"id": "skill.frontmatter.name", "support": "supported"}],
+        layout=[
+            {"id": "skill.file", "path": ".."},
+            {"id": "skills.project", "path": "<workspace-root>/"},
+        ],
+    )
+    folder = skill(tmp_path / "example", "name: example\n")
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assert result.exit_code == 7
+    assert result.report["written"] == []
+
+
+def test_a_plan_that_leaves_out_and_writes_twice_answers_for_leaving_out(tmp_path: Path) -> None:
+    """Both wrong at once: the code names the promise broken, not the lesser of the two.
+
+    Writing outside `--out` is the one thing this command promises never to do; writing twice
+    into one place is a plan of ours that would lose a file. Answered with code 8, the run
+    would report a collision and say nothing about having been about to write into somebody
+    else's folder, and the collision is the part that is fixed by editing the description.
+    """
+    root = four_row_tree(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[{"id": "skill.frontmatter.name", "support": "supported"}],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skill.top.README.md", "path": "<skill-name>/doc.md"},
+            {"id": "skill.top.NOTES.md", "path": "<skill-name>/doc.md"},
+            {"id": "skills.project", "path": f"{elsewhere}/skills/"},
+        ],
+    )
+    folder = skill(tmp_path / "example", "name: example\n")
+    (folder / "README.md").write_text("read me\n", encoding="utf-8")
+    (folder / "NOTES.md").write_text("notes\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assert result.exit_code == 7
+    assert not elsewhere.exists()
+    assert result.report["written"] == []
 
 
 def test_a_date_in_the_header_is_staged_as_the_text_iso_8601_spells(tmp_path: Path) -> None:
@@ -730,6 +1013,28 @@ def test_a_dangling_link_at_the_destination_is_an_occupied_place(tmp_path: Path)
     assert result.exit_code == 8
     assert list(elsewhere.iterdir()) == []
     assert result.report["written"] == []
+
+
+def test_a_link_partway_down_the_destination_is_not_written_through(tmp_path: Path) -> None:
+    """A link at a level above the destination is a door out of it, and is refused as one.
+
+    The check that a destination stays under `out` follows links, so one pointing away is
+    already caught. This one points back inside `out`, which that check is content with --
+    and it is still a path component this run did not create and cannot vouch for a moment
+    later. `mkdir(parents=True, exist_ok=True)` walks through it without a word, so the
+    question has to be asked of every level and not only of the last one.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    out = tmp_path / "out"
+    (out / "real").mkdir(parents=True)
+    (out / ".agents").symlink_to(out / "real")
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assert result.exit_code == 7
+    assert result.report["written"] == []
+    assert list((out / "real").iterdir()) == []
 
 
 def test_a_file_beside_the_skill_file_gets_a_row_and_is_never_lost_in_silence(
