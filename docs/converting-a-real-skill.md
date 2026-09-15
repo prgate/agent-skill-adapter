@@ -27,22 +27,25 @@ uv run agent-skill-adapter convert ~/.claude/skills/document-summary-arrangement
   clean        skill.frontmatter.name -- frontmatter key `name` (reproduced, specification)
   clean        skill.frontmatter.description -- frontmatter key `description` (reproduced, specification)
   clean        skill.dir.scripts -- bundled directory `scripts/` (reproduced, specification)
-  wrote /tmp/out/.agents/skills/document-summary-arrangement/SKILL.md (it belongs at .agents/skills/document-summary-arrangement/SKILL.md)
-  wrote /tmp/out/.agents/skills/document-summary-arrangement/scripts (it belongs at .agents/skills/document-summary-arrangement/scripts/)
+  wrote /tmp/out/.agents/skills/document-summary-arrangement-antigravity/SKILL.md (it belongs at .agents/skills/document-summary-arrangement-antigravity/SKILL.md)
+  wrote /tmp/out/.agents/skills/document-summary-arrangement-antigravity/scripts (it belongs at .agents/skills/document-summary-arrangement-antigravity/scripts/)
 ```
 
 The assembled folder, with the six scripts of the bundle carried over:
 
 ```
-/tmp/out/.agents/skills/document-summary-arrangement/SKILL.md
-/tmp/out/.agents/skills/document-summary-arrangement/scripts/…
+/tmp/out/.agents/skills/document-summary-arrangement-antigravity/SKILL.md
+/tmp/out/.agents/skills/document-summary-arrangement-antigravity/scripts/…
 ```
 
 `.agents/skills/` is not written in the converter: it is the `path` of the `skills.project`
 entry of `specs/google/antigravity-2.0.yaml`, with `<workspace-root>` standing for the
-folder `--out` names and `<skill-name>` for the folder that was read. `--scope user` takes
-`skills.user` instead, whose path begins with `~`; the report then names the home folder as
-the destination, and the files are still assembled under `--out` and nowhere else.
+folder `--out` names and `<skill-name>` for the folder that was read, suffixed with the
+target's own `environment` field -- `document-summary-arrangement` becomes
+`document-summary-arrangement-antigravity`, so that converting one skill to two targets
+never collides on one destination. `--scope user` takes `skills.user` instead, whose path
+begins with `~`; the report then names the home folder as the destination, and the files
+are still assembled under `--out` and nowhere else.
 
 ## 2. A skill that transfers with a loss — exit code 1
 
@@ -58,7 +61,7 @@ uv run agent-skill-adapter convert ~/.claude/skills/autopilot … --out /tmp/out
   lossy        skill.dir.phases -- bundled directory `phases/` (unknown, extension); no entry with this id in either description
   lossy        skill.dir.prompts -- bundled directory `prompts/` (unknown, extension); no entry with this id in either description
   lossy        skill.dir.tools -- bundled directory `tools/` (unknown, extension); no entry with this id in either description
-  wrote /tmp/out/.agents/skills/autopilot/SKILL.md (it belongs at .agents/skills/autopilot/SKILL.md)
+  wrote /tmp/out/.agents/skills/autopilot-antigravity/SKILL.md (it belongs at .agents/skills/autopilot-antigravity/SKILL.md)
   advice: `phases/` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
   advice: `prompts/` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle
   advice: `tools/` stayed in the skill folder: google/antigravity names no place for it, and a place picked for it here would be a guess about a layout only that environment's documentation can settle

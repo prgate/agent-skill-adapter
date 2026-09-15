@@ -17,6 +17,7 @@ from __future__ import annotations
 import codecs
 import json
 import os.path
+import re
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -721,22 +722,71 @@ def _layout(spec: EnvSpec, entry_id: str) -> str | None:
     return next((entry.path for entry in spec.layout if entry.id == entry_id), None)
 
 
-def _skill_name(skill_dir: Path) -> str:
-    """The skill's own name: the folder's last component as spelled, not as resolved.
+# A skill's own name, not documented by either environment description -- both merely say a
+# missing `name` defaults to the directory name (specs/anthropic/claude-code-2.1.yaml:113,
+# specs/google/antigravity-2.0.yaml:166) and neither states the rule a name itself must
+# follow. This is that rule, a repository-level one sourced from the Claude Code
+# documentation (https://code.claude.com/docs/en/skills), kept here rather than as a
+# `limits` entry a description's own freshness check would have to keep current.
+NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+NAME_MAX_LENGTH = 64
+NAME_RULE = (
+    f"lowercase letters, digits and single hyphens between them, at most {NAME_MAX_LENGTH} "
+    "characters"
+)
 
-    ``skill_dir.name`` is what the caller invoked the skill by -- a symbolic link included,
-    since a link installed under one name (dotfiles-managed skills routinely are) is still
-    that name to everyone who calls it, and resolving it would assemble the skill under the
-    link's target instead, and a loop of links would raise before this ever got to say so.
 
-    Resolved only as a fallback, for the one case the name as spelled cannot answer:
-    ``skill_dir.name`` is empty for ``.`` and ``..`` -- the very paths a caller spells that
-    way to say "the folder I am standing in" -- and an empty name would expand
-    ``<skill-name>`` in a layout path down to nothing, assembling the skill at the skills
-    root instead of inside a folder of its own there. ``_resolved`` answers a loop of links
-    met on that fallback with a refusal rather than a traceback.
+def _valid_name(value: str) -> bool:
+    """Whether ``value`` matches the skill-name rule above."""
+    return len(value) <= NAME_MAX_LENGTH and NAME_PATTERN.fullmatch(value) is not None
+
+
+def _skill_name(skill_dir: Path, front: Mapping[str, Any]) -> str:
+    """The skill's own name: the frontmatter's ``name``, or the folder's own last component.
+
+    Both descriptions agree that a missing ``name`` "defaults to the directory name", so the
+    frontmatter is asked first, and never overridden by what the folder happens to be called
+    once it has answered.
+
+    The directory name is read with ``os.path.abspath``, never ``Path.resolve()``: `abspath`
+    collapses ``.`` and ``..`` lexically, without touching the filesystem, so ``.``, ``..``,
+    a trailing slash and a symbolic link all get a correct answer from the one expression,
+    and a loop of links -- which raises out of `resolve()` -- never reaches this function at
+    all. A skill installed as a link keeps the name it is invoked by, not the link target's.
+
+    A name that fails the rule is a refusal, not a fallback: an invalid frontmatter ``name``
+    is never quietly replaced by the directory name it happens to sit in.
     """
-    return skill_dir.name or _resolved(skill_dir).name
+    declared = front.get("name")
+    if declared is not None:
+        candidate, found_as = declared, "the frontmatter `name`"
+    else:
+        candidate, found_as = Path(os.path.abspath(skill_dir)).name, "the directory name"
+    if isinstance(candidate, str) and _valid_name(candidate):
+        return candidate
+    raise ConvertError(
+        f"{skill_dir}: {found_as} is {candidate!r}, which is not a skill name -- {NAME_RULE}",
+        UNREADABLE,
+    )
+
+
+def _assembled_name(name: str, environment: str) -> str:
+    """``name``, suffixed with the target's own ``environment`` -- what a layout path expands.
+
+    One folder per target, so that converting the same skill to two targets never collides
+    on one destination. Validated by the same rule as `_skill_name`, because the result
+    becomes a path segment the same way: an oversize name or an ``environment`` that is not
+    itself lowercase-and-hyphens is refused rather than truncated, which would silently
+    rename a skill someone chose the name of.
+    """
+    assembled = f"{name}-{environment}"
+    if _valid_name(assembled):
+        return assembled
+    raise ConvertError(
+        f"{name!r} suffixed with the target environment {environment!r} is {assembled!r}, "
+        f"which is not a skill name -- {NAME_RULE}",
+        UNREADABLE,
+    )
 
 
 def _destination(template: str, skill_name: str) -> tuple[str, str]:
@@ -783,6 +833,7 @@ def _plan(
     hooks: Mapping[str, Any],
     *,
     root: str,
+    assembled_name: str,
 ) -> tuple[list[_Part], list[str]]:
     """What the assembly will write, and what it asks of a person once it has.
 
@@ -802,7 +853,7 @@ def _plan(
         # or a part could end up written and called left behind, or in neither list.
         if inside is None:
             continue
-        where, staged = _destination(f"{root.rstrip('/')}/{inside}", _skill_name(skill_dir))
+        where, staged = _destination(f"{root.rstrip('/')}/{inside}", assembled_name)
         parts.append(_Part(label, where, _under(out, staged), copied_from=skill_dir / label))
     carried, hooks_file = _hook_place(target, scope, properties, hooks)
     if not carried or hooks_file is None:
@@ -1245,15 +1296,25 @@ def _report(
     advice: Sequence[str],
     written: Sequence[dict[str, str]],
     error: str | None,
+    *,
+    name: str,
+    assembled_name: str | None,
 ) -> dict[str, Any]:
-    """The machine-readable report. ``report_schema`` first, and ``error`` says why it is thin."""
+    """The machine-readable report. ``report_schema`` first, and ``error`` says why it is thin.
+
+    ``name`` is the skill's own name -- the frontmatter's or the folder's -- and
+    ``assembled_name`` is that name suffixed with the target environment, the one every
+    destination in ``written`` is built from; ``None`` when the run was refused before the
+    target was even known. Carried apart and not merged into one field, because the second
+    is a property of *this* conversion and the first is not.
+    """
     return {
         "report_schema": REPORT_SCHEMA,
         "outcome": verdict.value,
         "exit_code": exit_code,
         "source": _environment(source),
         "target": _environment(target),
-        "skill": {"path": str(skill_dir), "name": _skill_name(skill_dir)},
+        "skill": {"path": str(skill_dir), "name": name, "assembled_name": assembled_name},
         "properties": [
             {
                 "id": entry.id,
@@ -1337,6 +1398,12 @@ def convert(
     properties: list[Property] = []
     advice: list[str] = []
     written: list[dict[str, str]] = []
+    # A best-effort label for a report that refuses before the frontmatter is read at all --
+    # `_gaps` failing, or `_findings` finding no folder or no `SKILL.md` there. Overwritten
+    # below once the frontmatter has answered for the skill's own name; left alone otherwise,
+    # exactly as it stood before this rule read the frontmatter first.
+    name = Path(os.path.abspath(skill_dir)).name
+    assembled_name: str | None = None
     # Until the assembly table has judged something there is no verdict to keep, and
     # "we could not read enough to say" is what `undecidable` means. Once it has, that
     # verdict stands even if the run then fails to write: being unable to put the files
@@ -1351,6 +1418,8 @@ def convert(
         gaps, target_spec = _gaps(root, source, target, allow_stale)
         side = UNREADABLE
         findings, front, rewritten = _findings(skill_dir)
+        name = _skill_name(skill_dir, front)
+        assembled_name = _assembled_name(name, target_spec.environment)
         properties, advice = _judge(findings, gaps, target_spec)
         declared = front.get(HOOKS_KEY)
         hooks = declared if isinstance(declared, Mapping) else {}
@@ -1378,7 +1447,14 @@ def convert(
         # half nobody documented is a folder that looks converted and is not.
         if out is not None and verdict is not Verdict.UNDECIDABLE:
             parts, asked = _plan(
-                skill_dir, Path(out), target_spec, scope, properties, hooks, root=ground
+                skill_dir,
+                Path(out),
+                target_spec,
+                scope,
+                properties,
+                hooks,
+                root=ground,
+                assembled_name=assembled_name,
             )
             written, linked = _assemble(Path(out), parts)
             advice += asked + linked
@@ -1409,9 +1485,21 @@ def convert(
             advice,
             written,
             str(stopped),
+            name=name,
+            assembled_name=assembled_name,
         )
         return Conversion(verdict, stopped.exit_code, report, _summary(report))
     report = _report(
-        skill_dir, source, target, verdict, EXIT_CODE[verdict], properties, advice, written, None
+        skill_dir,
+        source,
+        target,
+        verdict,
+        EXIT_CODE[verdict],
+        properties,
+        advice,
+        written,
+        None,
+        name=name,
+        assembled_name=assembled_name,
     )
     return Conversion(verdict, EXIT_CODE[verdict], report, _summary(report))

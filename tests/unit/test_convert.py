@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -536,42 +537,149 @@ def test_the_skill_is_assembled_at_the_paths_the_target_description_names(tmp_pa
 
     result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
 
+    assert result.report["skill"]["assembled_name"] == "example-antigravity"
     assert [(entry["from"], entry["to"]) for entry in result.report["written"]] == [
-        ("SKILL.md", ".agents/skills/example/SKILL.md"),
-        ("scripts/", ".agents/skills/example/scripts/"),
+        ("SKILL.md", ".agents/skills/example-antigravity/SKILL.md"),
+        ("scripts/", ".agents/skills/example-antigravity/scripts/"),
     ]
-    carried = out / ".agents/skills/example/scripts/run.sh"
+    carried = out / ".agents/skills/example-antigravity/scripts/run.sh"
     assert carried.read_text(encoding="utf-8") == "echo hi\n"
-    assert (out / ".agents/skills/example/SKILL.md").is_file()
-    assert not (out / ".agents/skills/example/sandbox").exists()
+    assert (out / ".agents/skills/example-antigravity/SKILL.md").is_file()
+    assert not (out / ".agents/skills/example-antigravity/sandbox").exists()
     assert any("sandbox/" in line for line in result.report["advice"])
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
 
-def test_a_skill_named_by_a_relative_dot_is_still_assembled_inside_its_own_folder(
-    tmp_path: Path,
-) -> None:
-    """``convert .`` names no folder of its own: ``Path(".").name`` is empty.
+def _an_ordinary_absolute_path(root: Path) -> tuple[str, Path | None, str]:
+    return str(skill(root / "widget", "")), None, "widget"
 
-    An empty ``<skill-name>`` would expand the skills-root layout path down to nothing extra,
-    assembling the skill loose at the skills root instead of inside a folder of its own --
-    beside, not inside, any other skill already there.
+
+def _a_relative_path(root: Path) -> tuple[str, Path | None, str]:
+    skill(root / "widget", "")
+    return "widget", root, "widget"
+
+
+def _a_trailing_slash(root: Path) -> tuple[str, Path | None, str]:
+    return f"{skill(root / 'widget', '')}/", None, "widget"
+
+
+def _a_dot_invoked_from_inside_the_skill_folder(root: Path) -> tuple[str, Path | None, str]:
+    folder = skill(root / "widget", "")
+    return ".", folder, "widget"
+
+
+def _a_dot_dot_invoked_from_a_subdirectory_of_it(root: Path) -> tuple[str, Path | None, str]:
+    folder = skill(root / "widget", "", directories=("scripts",))
+    return "..", folder / "scripts", "widget"
+
+
+def _a_skill_folder_that_is_a_symbolic_link(root: Path) -> tuple[str, Path | None, str]:
+    real = skill(root / "real-name", "")
+    link = root / "installed-as"
+    link.symlink_to(real)
+    return str(link), None, "installed-as"
+
+
+def _a_frontmatter_name_that_differs_from_the_folder_name(
+    root: Path,
+) -> tuple[str, Path | None, str]:
+    return str(skill(root / "widget", "name: gizmo\n")), None, "gizmo"
+
+
+NAME_CASES: dict[str, Callable[[Path], tuple[str, Path | None, str]]] = {
+    "an-ordinary-absolute-path": _an_ordinary_absolute_path,
+    "a-relative-path": _a_relative_path,
+    "a-trailing-slash": _a_trailing_slash,
+    "a-dot-invoked-from-inside-the-skill-folder": _a_dot_invoked_from_inside_the_skill_folder,
+    "a-dot-dot-invoked-from-a-subdirectory-of-it": _a_dot_dot_invoked_from_a_subdirectory_of_it,
+    "a-skill-folder-that-is-a-symbolic-link": _a_skill_folder_that_is_a_symbolic_link,
+    "a-frontmatter-name-that-differs-from-the-folder-name": (
+        _a_frontmatter_name_that_differs_from_the_folder_name
+    ),
+}
+"""How the same skill is named regardless of how its folder is spelled on the command line.
+
+Each builder returns what is passed to `convert`, where to run it from (`None` for the
+current directory), and the name the run must settle on. `..` from a subdirectory is the
+defect this rule replaces: `Path("..").name` reads as `".."`, which is not empty, so the old
+two-branch heuristic took it as the skill's own name and assembled the result outside
+`.agents/skills/` entirely rather than inside a folder there. `os.path.abspath` answers `..`,
+`.` and a trailing slash from the one expression that never touches the filesystem, and never
+follows the link of the last case -- a link keeps the name it is invoked by.
+"""
+
+
+@pytest.mark.parametrize("case", sorted(NAME_CASES))
+def test_the_skill_name_follows_one_rule_however_the_folder_is_spelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+) -> None:
+    """The frontmatter's `name` wins; short of one, the folder's own last component does --
+    and the assembled destination is built from that name and never lands outside
+    ``.agents/skills/``, whichever of the seven ways above the folder was named by.
     """
     root = assembly_tree(tmp_path)
-    folder = skill(tmp_path / "example", "name: example\n", directories=("scripts",))
-    out = tmp_path / "out"
-    cwd = Path.cwd()
-    os.chdir(folder)
-    try:
-        result = convert(".", SOURCE, TARGET, root=root, out=out, allow_stale=True)
-    finally:
-        os.chdir(cwd)
+    given, chdir_to, expected = NAME_CASES[case](tmp_path / case / "skill-root")
+    if chdir_to is not None:
+        monkeypatch.chdir(chdir_to)
+    out = tmp_path / case / "out"
 
-    assert [(entry["from"], entry["to"]) for entry in result.report["written"]] == [
-        ("SKILL.md", ".agents/skills/example/SKILL.md"),
-        ("scripts/", ".agents/skills/example/scripts/"),
-    ]
-    assert result.report["skill"]["name"] == "example"
+    result = convert(given, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assembled = f"{expected}-antigravity"
+    assert result.report["skill"]["name"] == expected
+    assert result.report["skill"]["assembled_name"] == assembled
+    assert {
+        "from": "SKILL.md",
+        "to": f".agents/skills/{assembled}/SKILL.md",
+        "path": str(out / ".agents/skills" / assembled / "SKILL.md"),
+    } in result.report["written"]
+
+
+INVALID_NAMES = ("Uppercase", "under_score", "has space", "-leading", "trailing-", "")
+"""Six ways a name fails the rule: none of them is quietly repaired into the directory name."""
+
+
+@pytest.mark.parametrize("bad_name", INVALID_NAMES)
+def test_a_frontmatter_name_that_fails_the_rule_is_refused_not_substituted(
+    tmp_path: Path, bad_name: str
+) -> None:
+    """Exit code 6, nothing assembled, and the report names the offending value.
+
+    Never a fall back to the directory name the folder happens to sit in: that would leave
+    the caller believing the frontmatter's own choice of name had been honoured.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "widget", f"name: {json.dumps(bad_name)}\n")
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assert result.exit_code == 6
+    assert result.verdict is Verdict.UNDECIDABLE
+    assert result.report["properties"] == []
+    assert result.report["written"] == []
+    assert not out.exists()
+    assert repr(bad_name) in result.report["error"]
+
+
+def test_a_name_that_only_overflows_once_the_target_suffix_is_appended_is_refused(
+    tmp_path: Path,
+) -> None:
+    """64 characters passes on its own; the target's own suffix can still push it over.
+
+    Refused rather than truncated: shortening a name someone chose is its own kind of loss,
+    and no row of the assembly table produces it.
+    """
+    root = assembly_tree(tmp_path)
+    long_name = "a" * 60
+    folder = skill(tmp_path / "widget", f"name: {long_name}\n")
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert result.exit_code == 6
+    assert result.verdict is Verdict.UNDECIDABLE
+    assert long_name in result.report["error"]
+    assert "antigravity" in result.report["error"]
 
 
 def test_a_skill_folder_that_is_a_loop_of_links_is_answered_with_a_report_and_not_a_traceback(
@@ -598,28 +706,6 @@ def test_a_skill_folder_that_is_a_loop_of_links_is_answered_with_a_report_and_no
     assert result.verdict is Verdict.UNDECIDABLE
     assert result.report["properties"] == []
     assert result.report["skill"]["name"] == "a"
-
-
-def test_a_skill_installed_as_a_link_keeps_the_name_it_is_invoked_by(tmp_path: Path) -> None:
-    """The folder name as spelled, link included, is the skill's name -- not its link target.
-
-    A dotfiles-managed skill is routinely installed as a link: ``installed-as -> real-name``.
-    Whoever calls it does so by ``installed-as``, and resolving the link would assemble the
-    skill under ``real-name`` instead while the report went on calling it ``installed-as`` --
-    one run, two names for the same skill.
-    """
-    root = assembly_tree(tmp_path)
-    real = skill(tmp_path / "real-name", "name: example\n")
-    link = tmp_path / "installed-as"
-    link.symlink_to(real)
-    out = tmp_path / "out"
-
-    result = convert(link, SOURCE, TARGET, root=root, out=out, allow_stale=True)
-
-    assert result.report["skill"]["path"] == str(link)
-    assert result.report["skill"]["name"] == "installed-as"
-    assert (out / ".agents/skills/installed-as/SKILL.md").is_file()
-    assert not (out / ".agents/skills/real-name").exists()
 
 
 def test_a_part_only_the_target_names_a_place_for_is_clean_not_undeclared(
@@ -660,8 +746,8 @@ def test_a_part_only_the_target_names_a_place_for_is_clean_not_undeclared(
     assert "undeclared" not in note.lower()
     assert {
         "from": "examples/",
-        "to": ".agents/skills/example/examples/",
-        "path": str(out / ".agents/skills/example/examples"),
+        "to": ".agents/skills/example-antigravity/examples/",
+        "path": str(out / ".agents/skills/example-antigravity/examples"),
     } in result.report["written"]
     assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
 
@@ -742,7 +828,7 @@ def test_a_symbolic_link_inside_the_skill_folder_is_carried_as_a_link_and_named(
 
     result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
 
-    staged = out / ".agents/skills/example/scripts"
+    staged = out / ".agents/skills/example-antigravity/scripts"
     assert staged.is_symlink()
     assert os.readlink(staged) == str(secret)
     assert any("symbolic link" in line and "scripts" in line for line in result.report["advice"])
@@ -764,7 +850,7 @@ def test_an_occupied_destination_stops_the_assembly_and_keeps_what_is_there(
     root = assembly_tree(tmp_path)
     folder = skill(tmp_path / "example", "name: example\n", directories=("scripts",))
     out = tmp_path / "out"
-    occupied = out / ".agents/skills/example/scripts"
+    occupied = out / ".agents/skills/example-antigravity/scripts"
     occupied.mkdir(parents=True)
     (occupied / "run.sh").write_text("mine\n", encoding="utf-8")
 
@@ -773,7 +859,7 @@ def test_an_occupied_destination_stops_the_assembly_and_keeps_what_is_there(
     assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 8)
     assert result.report["outcome"] == "clean"
     assert (occupied / "run.sh").read_text(encoding="utf-8") == "mine\n"
-    assert not (out / ".agents/skills/example/SKILL.md").exists()
+    assert not (out / ".agents/skills/example-antigravity/SKILL.md").exists()
     assert result.report["written"] == []
     assert result.report["error"]
 
@@ -845,7 +931,7 @@ def test_a_copy_that_fails_part_way_leaves_no_half_assembled_skill(tmp_path: Pat
     assert sorted(entry.relative_to(out).as_posix() for entry in out.rglob("*")) == [
         ".agents",
         ".agents/skills",
-        ".agents/skills/example",
+        ".agents/skills/example-antigravity",
     ]
 
 
@@ -1155,11 +1241,11 @@ def test_the_user_level_destination_is_the_home_folder_and_the_bytes_stay_under_
     assert result.report["written"] == [
         {
             "from": "SKILL.md",
-            "to": f"{home}/.gemini/config/skills/example/SKILL.md",
-            "path": str(out / ".gemini/config/skills/example/SKILL.md"),
+            "to": f"{home}/.gemini/config/skills/example-antigravity/SKILL.md",
+            "path": str(out / ".gemini/config/skills/example-antigravity/SKILL.md"),
         }
     ]
-    assert (out / ".gemini/config/skills/example/SKILL.md").is_file()
+    assert (out / ".gemini/config/skills/example-antigravity/SKILL.md").is_file()
     assert not home.exists()
 
 
@@ -1207,10 +1293,10 @@ def test_a_dangling_link_at_the_destination_is_an_occupied_place(tmp_path: Path)
     root = assembly_tree(tmp_path)
     folder = skill(tmp_path / "example", "name: example\n")
     out = tmp_path / "out"
-    (out / ".agents/skills/example").mkdir(parents=True)
+    (out / ".agents/skills/example-antigravity").mkdir(parents=True)
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    (out / ".agents/skills/example/SKILL.md").symlink_to(elsewhere / "SKILL.md")
+    (out / ".agents/skills/example-antigravity/SKILL.md").symlink_to(elsewhere / "SKILL.md")
 
     result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
 
