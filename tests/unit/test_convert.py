@@ -635,8 +635,19 @@ def test_the_skill_name_follows_one_rule_however_the_folder_is_spelled(
     } in result.report["written"]
 
 
-INVALID_NAMES = ("Uppercase", "under_score", "has space", "-leading", "trailing-", "")
-"""Six ways a name fails the rule: none of them is quietly repaired into the directory name."""
+INVALID_NAMES = (
+    "Uppercase",
+    "under_score",
+    "has space",
+    "-leading",
+    "trailing-",
+    "",
+    "widget\n",
+    "../evil",
+)
+"""Eight ways a name fails the rule: none of them is quietly repaired into the directory
+name, and none of the last two is let through by a match that stops before the end of the
+value -- a trailing newline and a `..` are what a path segment must never be built from."""
 
 
 @pytest.mark.parametrize("bad_name", INVALID_NAMES)
@@ -1012,6 +1023,7 @@ def test_two_parts_of_one_plan_aimed_at_one_destination_stop_it_before_the_first
     assert result.report["error"]
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 000 does not stop root from reading")
 def test_a_copy_that_fails_part_way_leaves_no_half_assembled_skill(tmp_path: Path) -> None:
     """A file this process cannot read, inside a bundle: exit code 7, a report, and empty `--out`.
 

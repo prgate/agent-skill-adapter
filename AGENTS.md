@@ -100,7 +100,7 @@ Reads vendor documentation of two agent environments into machine-checkable YAML
 - Python 3.10 (`.python-version`), uv-managed `.venv`; no environment variables, services or secrets. Dependencies: pydantic, pyyaml, typer, rich; dev: pytest, mypy, ruff, pre-commit — adding another is CFP Level 3.
 
 ### Tests
-- `make check` → ruff + mypy strict + 102 passed.
+- `make check` → ruff + mypy strict + pytest.
 - Five seams: `normalize` (text → hash), `loader` (tree → selection → staleness), `gaps` (`compare` on two tiny descriptions), `freshness` (injected `fetch`), `convert` (a temporary skill folder against two tiny descriptions — the internal steps are never tested apart from it).
 
 ### Pitfalls
