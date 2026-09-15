@@ -953,6 +953,26 @@ def test_a_symbolic_link_inside_the_skill_folder_is_carried_as_a_link_and_named(
     assert any("symbolic link" in line and "scripts" in line for line in result.report["advice"])
 
 
+def test_a_link_nested_inside_a_bundled_directory_is_named_by_its_path_within_it(
+    tmp_path: Path,
+) -> None:
+    """The advice names `scripts/inner/link`, not `link` and not the directory that holds it.
+
+    A link deep inside a copied directory is the one a caller has the hardest time finding,
+    and a report naming only the leaf, or only the part it came in with, tells them a link
+    exists somewhere under a directory they now have to walk themselves.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n", directories=("scripts",))
+    (folder / "scripts" / "inner").mkdir()
+    (folder / "scripts" / "inner" / "link").symlink_to(tmp_path / "elsewhere")
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    assert any("`scripts/inner/link`" in line for line in result.report["advice"])
+
+
 def test_a_skill_file_that_is_a_symbolic_link_is_read_and_assembled_whole(
     tmp_path: Path,
 ) -> None:
