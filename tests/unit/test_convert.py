@@ -1250,8 +1250,50 @@ def test_a_target_with_nowhere_to_put_a_skill_answers_the_same_either_way(tmp_pa
     assembled = convert(folder, SOURCE, TARGET, root=root, out=tmp_path / "out", allow_stale=True)
 
     assert (reported.verdict, reported.exit_code) == (assembled.verdict, assembled.exit_code)
-    assert (reported.verdict, reported.exit_code) == (Verdict.UNDECIDABLE, 3)
-    assert reported.report["error"]
+    # A price and not a refusal, exactly as it is for every other kind: the skill stays where
+    # it is and the report says why. A code 3 here would be this one skill deciding for the
+    # whole run, and a set of twenty would lose the nineteen rows it had already earned.
+    assert (reported.verdict, reported.exit_code) == (Verdict.LOSSY, 1)
+    assert reported.report["error"] is None
+    assert any("names no place" in line for line in reported.report["advice"])
+    assert reported.report["assets"][0]["assembled_name"] is None
+    assert assembled.report["written"] == []
+
+
+def test_a_target_with_no_place_for_a_skill_keeps_the_rest_of_the_set_in_the_report(
+    tmp_path: Path,
+) -> None:
+    """One root nobody named must not cost the other nineteen entities their rows.
+
+    The refusal it used to be was raised before a single entity had been judged, so a set
+    of many answered with an empty report about a run that never looked at most of it.
+    """
+    root = four_row_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[{"id": "skill.frontmatter.description", "support": "supported"}],
+        layout=[{"id": "agents.project", "path": ".agents/agents/"}],
+    )
+    skills = tmp_path / "set" / "bundles"
+    skill(skills / "alpha", "name: alpha\n")
+
+    result = convert_set(
+        Inputs(translation=MOVING, skills=(skills,), agents=(subagents(tmp_path / "roles"),)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=tmp_path / "out",
+        allow_stale=True,
+    )
+    named = {(asset["kind"], asset["name"]) for asset in result.report["assets"]}
+
+    assert ("skill", "alpha") in named
+    assert ("subagent", "note-keeper") in named
+    # The subagent had somewhere to go and went there; only the skill stayed.
+    assert [entry["to"] for entry in result.report["written"]] == [".agents/agents/note-keeper.md"]
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
 
 def test_the_report_names_the_place_the_bytes_are(tmp_path: Path) -> None:
@@ -1891,7 +1933,15 @@ def value_tree(tmp_path: Path, *, values: list[str] | None) -> Path:
     target: list[dict[str, Any]] = [dict(entry) for entry in fields]
     if values is not None:
         target[SUBAGENT_FIELDS.index("subagent.frontmatter.model")]["values"] = values
-    write(root, vendor="google", environment="antigravity", capabilities=target)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=target,
+        # A place for a subagent, because a target that names none has nowhere to put one at
+        # all -- a price of its own, and not what these cases about values turn on.
+        layout=[{"id": "agents.project", "path": ".agents/agents/"}],
+    )
     return root
 
 
@@ -2204,3 +2254,351 @@ def test_a_run_that_was_stopped_keeps_its_code_over_the_unwritten_report(tmp_pat
     assert issued["exit_code"] == 6
     assert str(folder) in issued["error"]
     assert str(nowhere) in issued["error"]
+
+
+MOVING = Rules.model_validate(
+    {
+        "rules_version": "2.0",
+        "value_maps": {
+            "subagent.frontmatter.model": {"opus": "pro", "sonnet": "pro"},
+            # The empty left-hand side is the value a file that declares none has: the rule
+            # says what a rule file without a trigger gets, in the same shape as every other
+            # pair -- what was written, and what it becomes.
+            "rules.frontmatter.trigger": {"": "always_on"},
+        },
+        "undocumented": {"action": "copy", "note": "nothing declares this file"},
+    }
+)
+"""Rules for a set of several kinds: a model tier to translate and a header to add."""
+
+
+def destinations_tree(tmp_path: Path) -> Path:
+    """Descriptions whose target names a place for every kind of this set except a command."""
+    root = tmp_path / "specs"
+    fields: list[dict[str, Any]] = [
+        {"kind": "subagent-field", "id": entry, "support": "supported"} for entry in SUBAGENT_FIELDS
+    ]
+    write(root, vendor="anthropic", environment="claude-code", capabilities=fields)
+    target: list[dict[str, Any]] = [dict(entry) for entry in fields]
+    target[SUBAGENT_FIELDS.index("subagent.frontmatter.model")]["values"] = [
+        "inherit",
+        "flash",
+        "pro",
+    ]
+    target.append(
+        {
+            "kind": "settings-file",
+            "id": "rules.frontmatter.trigger",
+            "support": "supported",
+            "values": ["always_on", "model_decision"],
+        }
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=target,
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+            {"id": "agents.project", "path": ".agents/agents/"},
+            {"id": "agents.user", "path": "~/.gemini/config/agents/"},
+            {"id": "rules.project", "path": ".agents/rules/"},
+        ],
+    )
+    return root
+
+
+def subagents(folder: Path, frontmatter: str = "model: sonnet\n") -> Path:
+    """A folder of subagents named nothing like the target's own, holding one subagent."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "note-keeper.md").write_text(
+        f"---\nname: note-keeper\ndescription: keeps notes\n{frontmatter}---\n\nYou keep notes.\n",
+        encoding="utf-8",
+    )
+    return folder
+
+
+def test_a_subagent_is_assembled_where_the_target_names_agents_with_the_value_translated(
+    tmp_path: Path,
+) -> None:
+    """The whole point of the track: the file lands where the environment reads it, and reads.
+
+    A subagent copied to the right folder carrying `model: sonnet` is as invisible as one
+    never copied -- the target's own closed set has no such tier -- so the destination and
+    the translated header are one acceptance and not two. Both are read off the target
+    description written above, never recomputed the way the code computes them.
+    """
+    root = destinations_tree(tmp_path)
+    folder = subagents(tmp_path / "set" / "roles")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(folder,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert [(entry["from"], entry["to"]) for entry in result.report["written"]] == [
+        ("note-keeper.md", ".agents/agents/note-keeper.md")
+    ]
+    assert "model: pro\n" in staged
+    assert "model: sonnet" not in staged
+    assert staged.endswith("\nYou keep notes.\n")
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_the_level_the_caller_asked_for_decides_which_agents_root_is_used(tmp_path: Path) -> None:
+    """`--scope user` is the other entry of the same pair, and the bytes still stay under out."""
+    root = destinations_tree(tmp_path)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(subagents(tmp_path / "set" / "roles"),)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        scope=Scope.USER,
+        allow_stale=True,
+    )
+    written = result.report["written"][0]
+
+    assert written["to"] == f"{Path.home()}/.gemini/config/agents/note-keeper.md"
+    assert written["path"] == str(out / ".gemini/config/agents/note-keeper.md")
+
+
+def test_a_rules_file_moves_to_the_rules_root_and_carries_the_header_that_loads_it(
+    tmp_path: Path,
+) -> None:
+    """`.agents/rules/` and `trigger: always_on`: without either, the rule is on disk and idle.
+
+    The value is the target's own, from the closed set its description names; that the
+    header is added at all is the translation rules' decision, and the report shows it as
+    the applied rule it is.
+    """
+    root = destinations_tree(tmp_path)
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("Be brief.\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert [entry["to"] for entry in result.report["written"]] == [".agents/rules/tone.md"]
+    assert (out / ".agents/rules/tone.md").read_text(encoding="utf-8") == (
+        "---\ntrigger: always_on\n---\n\nBe brief.\n"
+    )
+    assert [(entry["id"], entry["to"]) for entry in result.report["translations"]] == [
+        ("rules.frontmatter.trigger", "always_on")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("header", "expected", "applied"),
+    [
+        ("---\nscope: repo\n---\n\n", "---\ntrigger: always_on\nscope: repo\n---\n\n", 1),
+        ("---\ntrigger: model_decision\n---\n\n", "---\ntrigger: model_decision\n---\n\n", 0),
+    ],
+    ids=["a header without the key", "a header that already sets it"],
+)
+def test_a_rules_file_that_has_a_header_keeps_it_and_only_gains_what_is_missing(
+    tmp_path: Path, header: str, expected: str, applied: int
+) -> None:
+    """Somebody else's header is not redecided: the key is added, or nothing happens at all."""
+    root = destinations_tree(tmp_path)
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text(f"{header}Be brief.\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert (out / ".agents/rules/tone.md").read_text(encoding="utf-8") == f"{expected}Be brief.\n"
+    assert len(result.report["translations"]) == applied
+
+
+def test_two_rule_files_of_one_name_from_different_folders_collide_rather_than_overwrite(
+    tmp_path: Path,
+) -> None:
+    """The second would land on the first, and a report calling both carried over is a lie."""
+    root = destinations_tree(tmp_path)
+    named = []
+    for folder in ("house", "team"):
+        rule = tmp_path / "set" / folder / "tone.md"
+        rule.parent.mkdir(parents=True)
+        rule.write_text("Be brief.\n", encoding="utf-8")
+        named.append(rule)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=tuple(named)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert result.exit_code == 8
+    assert result.report["written"] == []
+    assert not (out / ".agents/rules/tone.md").exists()
+
+
+@pytest.mark.parametrize("names", [("note.md", "recap.md"), ()], ids=["two commands", "none"])
+def test_every_command_earns_one_refusal_and_no_command_is_ever_written(
+    tmp_path: Path, names: tuple[str, ...]
+) -> None:
+    """A row each, naming what it is, why it stays and what to do instead -- and never a file.
+
+    Counted against the commands on the input and not against a number somebody observed
+    once: an empty folder of commands earns no refusals at all, and that is the same rule.
+    """
+    root = destinations_tree(tmp_path)
+    commands = tmp_path / "set" / "shortcuts"
+    commands.mkdir(parents=True)
+    for name in names:
+        (commands / name).write_text("Do the thing.\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, commands=(commands,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    refused = [
+        entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if entry["id"] == "command.file"
+    ]
+
+    assert len(refused) == len(names)
+    assert {entry["found_as"] for entry in refused} == {f"command file `{name}`" for name in names}
+    assert all(entry["note"] == convert_module.NO_ROOM_FOR[Kind.COMMAND] for entry in refused)
+    assert result.report["written"] == []
+
+
+@pytest.mark.parametrize("action", ["copy", "skip"])
+def test_the_rule_for_an_undocumented_file_is_carried_out_and_not_only_printed(
+    tmp_path: Path, action: str
+) -> None:
+    """`action` decides what happens to a file nobody declared; the row says so either way.
+
+    The row has been there since the set report; until now the action beside it decided
+    nothing, so a rules file saying `skip` still carried the file across.
+    """
+    root = destinations_tree(tmp_path)
+    folder = subagents(tmp_path / "set" / "roles")
+    (folder / "openai.yaml").write_text("model: gpt\n", encoding="utf-8")
+    out = tmp_path / "out"
+    translation = MOVING.model_copy(
+        update={"undocumented": MOVING.undocumented.model_copy(update={"action": action})}
+    )
+
+    result = convert_set(
+        Inputs(translation=translation, agents=(folder,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    carried = str(out / "roles/openai.yaml") in {
+        entry["path"] for entry in result.report["written"]
+    }
+
+    assert carried is (action == "copy")
+    assert (out / "roles/openai.yaml").exists() is (action == "copy")
+    # Never in the root the target reads as a folder of subagents, whichever way the rule
+    # went: what is carried is the file, not a claim that the environment will take it.
+    assert not (out / ".agents/agents/openai.yaml").exists()
+    # The row is there whichever way the rule went: a file dropped in silence is the one
+    # thing this command exists to prevent, and copying it is not a reason to stop saying so.
+    assert any(
+        entry["found_as"] == "openai.yaml"
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+    )
+
+
+def test_a_rule_file_that_is_not_utf_8_is_refused_with_its_path_and_still_reports(
+    tmp_path: Path,
+) -> None:
+    """Somebody else's bytes are not this command's to crash on: a refusal, never a traceback.
+
+    Every other file of a set already answers this way, and a caller who gets a stack trace
+    instead of a report has no exit code to act on and no path to go and look at.
+    """
+    root = destinations_tree(tmp_path)
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_bytes(b"Soyez bref\xe9\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert result.exit_code == 6
+    assert str(rule) in result.report["error"]
+    assert result.report["written"] == []
+    assert not out.exists()
+
+
+def test_an_undocumented_path_is_never_staged_in_a_root_the_target_scans_for_entities(
+    tmp_path: Path,
+) -> None:
+    """`action: copy` keeps the file; it does not hand the environment a broken entity.
+
+    A folder with no skill file inside the target's own skills root is a skill the
+    environment will try to read and fail to, which is worse than the silence this whole
+    command exists to break -- and it contradicts the very row that tells the caller to
+    place the file by hand. It is staged under `out` instead, beside the part it came from.
+    """
+    root = destinations_tree(tmp_path)
+    skills = tmp_path / "set" / "bundles"
+    skill(skills / "alpha", "name: alpha\n")
+    (skills / "_templates").mkdir()
+    (skills / "_templates" / "note.md").write_text("A template.\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, skills=(skills,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert not (out / ".agents/skills/_templates").exists()
+    assert (out / "bundles/_templates/note.md").read_text(encoding="utf-8") == "A template.\n"
+    assert (out / ".agents/skills/alpha-antigravity/SKILL.md").is_file()
+    assert str(out / "bundles/_templates") in {entry["path"] for entry in result.report["written"]}

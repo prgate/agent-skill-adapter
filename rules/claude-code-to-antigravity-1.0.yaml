@@ -27,6 +27,15 @@ value_maps:
     Grep: grep_search
     Bash: run_command
 
+  # What a rule file that names no trigger gets. The empty left-hand side is the value such
+  # a file has -- none -- so the pair reads as every other pair here reads: what was
+  # written, and what it becomes. The target loads `always_on` rules unconditionally and
+  # leaves the rest on disk until the model asks for them, so a rule file carried across
+  # without this key is a file that never takes effect; the closed set the value has to
+  # belong to is the description's, and only the choice between its members is ours.
+  rules.frontmatter.trigger:
+    "": always_on
+
 # Build leftovers and tool caches. Matched against every part of a relative path, so a
 # name here covers the whole directory under it. Declared here so that no such name has to
 # be spelled in code.

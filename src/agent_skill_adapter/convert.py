@@ -11,10 +11,12 @@ One report over the whole set and one verdict, the worst of them: a run that ans
 entity would leave the caller adding up exit codes themselves. The rows are grouped by the
 entity they were found in, so that a set of hundreds of files is still read by a person.
 
-Nothing is written without ``out``. With it, each skill is assembled under that folder at
-the paths the target description names -- every one of them read from its ``layout``, so
-that what this command believes about the target environment is only ever what the
-description says, and is re-checked when the description is.
+Nothing is written without ``out``. With it, every entity the target has a root for is
+assembled under that folder at the paths the target description names -- every one of them
+read from its ``layout``, so that what this command believes about the target environment
+is only ever what the description says, and is re-checked when the description is. An
+entity of a kind the target names no root for is written nowhere and said out loud instead:
+a file put where nothing reads it is the silence this command exists to break.
 """
 
 from __future__ import annotations
@@ -211,6 +213,24 @@ WORKAROUNDS: dict[str, tuple[str, ...]] = {
 }
 
 
+NO_ROOM_FOR = {
+    Kind.COMMAND: (
+        "no entry with this id in either description, and the target names no root for one "
+        "either: there is nothing for a command to become and nowhere for the file to go, "
+        "so it is left where it is rather than copied where nothing would read it. Call the "
+        "skill the command wraps by its own name -- a skill of the target is invoked by "
+        "name and needs no wrapper -- or move what the command did into that skill's body"
+    ),
+}
+"""Why an entity of this kind does not cross, in place of the plain silence `UNDECLARED`.
+
+Keyed by the kind of entity and not by the entry id, because what is wrong is the kind: a
+command has no counterpart in the target and no place to be put, and one row per command
+has to say all three of what it is, why it stays and what to do instead (FR-21, FR-22).
+A kind absent here gets `UNDECLARED`, which is the whole of what is known about it.
+"""
+
+
 class Scope(str, Enum):
     """Which level of the target environment the skill is assembled for.
 
@@ -222,7 +242,18 @@ class Scope(str, Enum):
     USER = "user"
 
 
-SKILLS_ROOT = {Scope.PROJECT: "skills.project", Scope.USER: "skills.user"}
+ROOT_ENTRY = {
+    Kind.SKILL: {Scope.PROJECT: "skills.project", Scope.USER: "skills.user"},
+    Kind.SUBAGENT: {Scope.PROJECT: "agents.project", Scope.USER: "agents.user"},
+    # One entry for both levels, which is the one place a level is not the caller's to
+    # choose: the user-level entry of a target may be a single shared document rather than
+    # a folder of files, and appending somebody else's rules to a document they wrote is
+    # not a transfer. A kind absent from this table is assembled nowhere at all.
+    Kind.RULES: {Scope.PROJECT: "rules.project", Scope.USER: "rules.project"},
+}
+"""Where an entity of each kind lives in an environment, by the level it is installed at."""
+
+SKILLS_ROOT = ROOT_ENTRY[Kind.SKILL]
 HOOKS_FILE = {Scope.PROJECT: "hooks.project", Scope.USER: "hooks.user"}
 SKILL_FILE = "skill.file"
 """Entry ids the assembly asks the target description for. Ids, and never paths.
@@ -380,6 +411,7 @@ def _judge(
     gaps: Mapping[str, Gap],
     target: EnvSpec,
     translation: Rules,
+    kind: Kind,
 ) -> tuple[list[Property], list[str]]:
     """Every finding against the comparison, once per entry id, plus the advice it earns.
 
@@ -427,7 +459,8 @@ def _judge(
             source_says, note = None, TARGET_ONLY
         else:
             outcome, origin = Outcome.UNKNOWN, Origin.EXTENSION
-            source_says, target_says, note = None, None, UNDECLARED
+            source_says, target_says = None, None
+            note = NO_ROOM_FOR.get(kind, UNDECLARED)
         verdict = verdict_of(outcome, origin)
         properties.append(
             Property(
@@ -654,6 +687,59 @@ def _translated(
     return rows, advice, applied
 
 
+TRIGGER_ENTRY = "rules.frontmatter.trigger"
+"""The entry whose value decides whether a rule file the target holds is loaded at all.
+
+An id, like every other id here, and never the value: what the field may be set to is the
+closed set the target description names, and which of those values a file that names none
+gets is the translation rules' to say. Proved by running the environment (D01): a rule
+file without this key sits in the rules folder and never takes effect.
+"""
+
+NOTHING_WRITTEN = ""
+"""How the rules spell the value of a field a file does not carry, as the left side of a pair.
+
+A rule file is carried whole and its header is nobody's business but its author's, so the
+only value there is to translate is the one that is not there. Spelled as the empty string
+rather than as a rule of its own shape, so that the pair reads as every other pair reads --
+what was written, and what it becomes -- and needs nothing of the rules file format.
+"""
+
+
+def _trigger(
+    asset: Asset, target: EnvSpec, translation: Rules
+) -> tuple[list[Property], list[dict[str, str]]]:
+    """The header a rule file is missing, as the rule that adds it -- or the row saying why not.
+
+    A file that declares the key already keeps what it declares: adding what is missing is
+    the whole of what this is entitled to do, and a value the author chose is not ours to
+    redecide. Otherwise the two documents answer between them, exactly as they do for any
+    other value: the description names the set, the rules name which of it a file with
+    nothing written gets, and a run missing either says so in a row instead of guessing.
+    """
+    key = TRIGGER_ENTRY.rpartition(".")[2]
+    if _declares(asset.path, key):
+        return [], []
+    found_as = f"no frontmatter key `{key}`"
+    allowed = _closed_set(target, TRIGGER_ENTRY)
+    became = translation.value_of(TRIGGER_ENTRY, NOTHING_WRITTEN)
+    if allowed is None:
+        return [_unusable(TRIGGER_ENTRY, found_as, NO_VALUE_SET)], []
+    if became is None:
+        return [_unusable(TRIGGER_ENTRY, found_as, NO_COUNTERPART)], []
+    if became not in allowed:
+        return [_unusable(TRIGGER_ENTRY, found_as, REFUSED_BY_THE_TARGET)], []
+    return [], [
+        {
+            "path": str(asset.path),
+            "id": TRIGGER_ENTRY,
+            "from": NOTHING_WRITTEN,
+            "to": became,
+            "rule": f"{TRIGGER_ENTRY} of the translation rules {translation.version}",
+        }
+    ]
+
+
 def _layout(spec: EnvSpec, entry_id: str) -> str | None:
     """The path the description gives ``entry_id``, or ``None`` when it names none."""
     return next((entry.path for entry in spec.layout if entry.id == entry_id), None)
@@ -821,6 +907,70 @@ def _in_the_value_of(header: str, key: str, was: str, became: str) -> str:
     return "\n".join(lines)
 
 
+def _text_of(path: Path) -> str:
+    """The text of ``path``, with bytes that are not UTF-8 answered rather than raised.
+
+    Every file this module opens belongs to somebody else, and a `UnicodeDecodeError` is
+    neither of the two shapes of refusal answered for here: it is a `ValueError`, so it
+    passes straight through the handler that turns a filesystem fault into a report and
+    leaves the caller a traceback instead of an exit code and a path to go and look at.
+    The reading of the set already refuses such a file in these words (`assets.frontmatter`);
+    the files that reach this module -- a rule file carried whole -- never passed through it.
+    """
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        raise ConvertError(f"{path}: not UTF-8 text ({error})", UNREADABLE) from error
+
+
+def _header_of(text: str) -> tuple[str, int] | None:
+    """The text of the frontmatter and where it closes, or ``None`` when there is none.
+
+    Both halves are needed by every caller that edits a header: the text to read the keys
+    out of, and the offset to put the rest of the file back at.
+    """
+    if not text.startswith("---"):
+        return None
+    closing = FRONTMATTER_CLOSE.search(text, 3)
+    return None if closing is None else (text[3 : closing.start()], closing.start())
+
+
+def _declares(path: Path, key: str) -> bool:
+    """Whether the file at ``path`` opens with a header that sets ``key`` at the top level.
+
+    A line that is indented continues the value of the key above it, so only a line that
+    opens a key of its own can be the one asked about -- the same rule `_in_the_value_of`
+    reads a header by, and the same one that keeps a nested `trigger:` from answering here.
+    """
+    header = _header_of(_text_of(path))
+    if header is None:
+        return False
+    return any(
+        opens is not None and opens.group(1).strip().strip("'\"") == key
+        for opens in (_OPENS_A_KEY.match(line) for line in header[0].split("\n"))
+    )
+
+
+def _with_trigger(path: Path, applied: Sequence[Mapping[str, str]]) -> str | None:
+    """The rule file with the keys the rules add at the top of its header, or ``None``.
+
+    Added and never merged: `_trigger` has already established that the file declares none
+    of these keys, so there is nothing of the author's to overwrite. A file that carries no
+    header at all gets one, which is the case the whole rule exists for -- a rule file of
+    the source environment is plain Markdown, and plain Markdown is what the target leaves
+    on disk unread.
+    """
+    if not applied:
+        return None
+    text = _text_of(path)
+    keys = [(rule["id"].rpartition(".")[2], rule["to"]) for rule in applied]
+    added = "".join(f"{key}: {value}\n" for key, value in keys)
+    header = _header_of(text)
+    if header is None:
+        return f"---\n{added}---\n\n{text}"
+    return f"---\n{added.rstrip()}{header[0]}{text[header[1] :]}"
+
+
 def _with_translations(path: Path, applied: Sequence[Mapping[str, str]]) -> str | None:
     """The skill file with every applied rule in its header, or ``None`` when none were.
 
@@ -832,22 +982,129 @@ def _with_translations(path: Path, applied: Sequence[Mapping[str, str]]) -> str 
     """
     if not applied:
         return None
-    text = path.read_text(encoding="utf-8")
-    closing = FRONTMATTER_CLOSE.search(text, 3)
-    if closing is None:
+    text = _text_of(path)
+    found = _header_of(text)
+    if found is None:
         # Unreachable: a file whose header never closes was refused while it was being read,
         # and there would be no translation to apply to it. Answered rather than asserted,
         # because the answer is the file exactly as it was found.
         return None
-    header = text[3 : closing.start()]
+    header, closes = found
     for rule in applied:
         # The key is the last step of the entry id: the ids of a header field are built from
         # the key as written (`assets`), so this takes it back without a table of pairs.
         header = _in_the_value_of(header, rule["id"].rpartition(".")[2], rule["from"], rule["to"])
-    return f"---{header}{text[closing.start() :]}"
+    return f"---{header}{text[closes:]}"
+
+
+CONTENT = {Kind.SUBAGENT: _with_translations, Kind.RULES: _with_trigger}
+"""How the one file of an entity is rewritten on the way across, by the kind of entity.
+
+A subagent crosses with the values of its header put into the target's vocabulary; a rule
+file crosses with the header that makes the target read it at all. A kind absent here is
+copied byte for byte, which is what a file nobody has a rule about deserves.
+"""
 
 
 def _plan(
+    entity: Assessed,
+    out: Path,
+    target: EnvSpec,
+    scope: Scope,
+    translation: Rules,
+) -> tuple[list[_Part], list[str]]:
+    """What one entity of the set contributes to the plan, and what it asks of a person.
+
+    Four answers, and the kind of the entity picks between them. A skill is a folder with
+    parts, and has a plan of its own. A subagent and a rule file are one file each, put at
+    the root the target names for their kind. A record of a named part rather than of an
+    entity carries the paths nobody declared, whose fate is the translation rules' to
+    decide. Everything else -- a command above all -- is assembled nowhere, and its report
+    row is the whole of what this run does about it.
+    """
+    asset = entity.asset
+    if not entity.name:
+        return _undocumented(entity, out, translation)
+    if entity.assembled_name is None:
+        return [], []
+    root = _layout(target, ROOT_ENTRY[asset.kind][scope])
+    if root is None:
+        # Unreachable: `_nowhere` asked the same question while the entity was judged, and
+        # an entity with no root to go to was left without an assembled name. Answered and
+        # not asserted, because the answer -- assemble nothing -- is the right one anyway.
+        return [], []
+    if asset.kind is Kind.SKILL:
+        return _plan_skill(
+            asset.path,
+            out,
+            target,
+            scope,
+            entity.properties,
+            _hooks_of(asset),
+            root=root,
+            assembled_name=entity.assembled_name,
+            translations=entity.translations,
+        )
+    rewrite = CONTENT.get(asset.kind)
+    where, staged = _destination(f"{root.rstrip('/')}/{entity.assembled_name}", entity.name)
+    return [
+        _Part(
+            asset.path.name,
+            where,
+            _under(out, staged),
+            copied_from=asset.path,
+            content=None if rewrite is None else rewrite(asset.path, entity.translations),
+        )
+    ], []
+
+
+STAGED_NOT_PLACED = (
+    "is staged under the folder this run was told to assemble into and put in no root of "
+    "the target: no description names a place for it, and every place they do name is read "
+    "by the target as a folder of entities of one kind -- a path that is not one of those "
+    "would be found there and read as a broken one, which is worse than the silence this "
+    "command exists to break and contradicts the row telling the caller to place it by hand"
+)
+"""Why a file the rules say to carry is carried into the result but never into a root.
+
+The rules decide that such a file stays with the set (FR-30); where a file belongs in the
+target environment is the target description's to say, and it says nothing. So it crosses
+into the result, under the name of the part it was found in, and the caller places it.
+"""
+
+
+def _undocumented(entity: Assessed, out: Path, translation: Rules) -> tuple[list[_Part], list[str]]:
+    """The paths of a named part that no description declares, if the rules say to carry them.
+
+    The rules state one rule for such a file (FR-30) and this is where it is carried out:
+    ``skip`` leaves the file where it is, ``copy`` brings it into the result -- staged under
+    the name of the part it was found in, and never in a root of the target (:data:`
+    STAGED_NOT_PLACED`). Either way it keeps the report row it earned while the set was
+    read, because what the rule decides is where the file ends up and never whether it is
+    mentioned.
+    """
+    if translation.undocumented.action != "copy":
+        return [], []
+    parts = []
+    for finding in entity.asset.findings:
+        if finding.ids or finding.note != UNDECLARED_PATH:
+            continue
+        # The name of the named part and then the path as it was found inside it: the input
+        # laid out as it was given, which is the one arrangement of these files anybody has
+        # ever stated. Two parts holding a `README.md` each keep one apiece by it.
+        staged = f"{entity.asset.path.name}/{finding.found_as}"
+        parts.append(
+            _Part(
+                finding.found_as,
+                staged,
+                _under(out, staged),
+                copied_from=entity.asset.path / finding.found_as,
+            )
+        )
+    return parts, [f"`{part.label}` {STAGED_NOT_PLACED}" for part in parts]
+
+
+def _plan_skill(
     skill_dir: Path,
     out: Path,
     target: EnvSpec,
@@ -861,9 +1118,10 @@ def _plan(
 ) -> tuple[list[_Part], list[str]]:
     """What the assembly will write, and what it asks of a person once it has.
 
-    ``root`` is where a skill of the target environment lives, as `_skills_root` read it off
-    the layout -- and refused the run when the layout named nowhere, which is why there is
-    always one here.
+    ``root`` is where a skill of the target environment lives, read off the layout by `_plan`
+    under the id `ROOT_ENTRY` gives this kind and this level. There is always one here because
+    a skill the layout named nowhere for never reached a plan: `_nowhere` answered for it while
+    the skill was judged, and left it without the assembled name `_plan` requires.
 
     A part the target description names no path for is not assembled: guessing where it goes
     would be inventing the target environment's layout. It keeps its row in the report, and
@@ -919,24 +1177,6 @@ def _under(out: Path, staged: str) -> Path:
     ``..``, and the checks would have been made about a place nothing was written to.
     """
     return Path(os.path.normpath(out / staged))
-
-
-def _skills_root(target: EnvSpec, scope: Scope) -> str:
-    """Where a skill of the target environment lives, or the refusal that there is nowhere.
-
-    Asked whether or not the caller wants the bytes written: that a target names no place for
-    a skill file is read off its layout like everything else here, so the answer -- and the
-    exit code -- cannot depend on `--out`. It is not a part left behind either, and the code
-    says which: nothing is known about where any of this skill goes, which is `undecidable`.
-    """
-    root = _layout(target, SKILLS_ROOT[scope])
-    if root is None or _layout(target, SKILL_FILE) is None:
-        raise ConvertError(
-            f"{target.vendor}/{target.environment} names no place for a skill file at the "
-            f"{scope.value} level, so there is nowhere to assemble into",
-            EXIT_CODE[Verdict.UNDECIDABLE],
-        )
-    return root
 
 
 def _places(target: EnvSpec, properties: Sequence[Property]) -> list[tuple[str, str | None]]:
@@ -996,9 +1236,8 @@ def _left_behind(
     list looks the same whether the run had nowhere to put it or never got that far.
 
     The skill file cannot turn up here: a target that names no place for one has nowhere to
-    assemble into at all, and `_skills_root` has refused the run before this is asked -- that
-    is the whole skill with nowhere to go, not one part of it left behind while the rest
-    crosses, and it carries the other code.
+    put the skill at all, and `_nowhere` has answered for it before this is asked -- that is
+    the whole skill left where it is, not one part of it left behind while the rest crosses.
     """
     lines = [
         f"`{label}` stayed in the skill folder: {target.vendor}/{target.environment} names "
@@ -1548,6 +1787,30 @@ def _hooks_of(asset: Asset) -> Mapping[str, Any]:
     return declared if isinstance(declared, Mapping) else {}
 
 
+def _nowhere(target: EnvSpec, kind: Kind, scope: Scope) -> list[str]:
+    """The line an entity whose kind the target names no root for earns, in the report's words.
+
+    The same price `_left_behind` names for one part of a skill, for a whole entity of
+    another kind: the target documents no place, and a place picked here would be a guess
+    about a layout only that environment's documentation can settle. A line and not a
+    refusal, because the rest of the set is unaffected and stopping the run over it would
+    lose every entity that did have somewhere to go.
+    """
+    entry = ROOT_ENTRY.get(kind)
+    if entry is None:
+        return []
+    # A skill is a folder and needs two answers: the root its folder sits in, and what the
+    # file inside it is called. Every other kind crosses as one file and needs only the root.
+    wanted = [entry[scope], SKILL_FILE] if kind is Kind.SKILL else [entry[scope]]
+    if all(_layout(target, item) is not None for item in wanted):
+        return []
+    return [
+        f"the {kind.value} stayed where it is: {target.vendor}/{target.environment} names no "
+        f"place for one at the {scope.value} level, and a place picked for it here would be "
+        "a guess about a layout only that environment's documentation can settle"
+    ]
+
+
 def _assess(
     asset: Asset,
     gaps: Mapping[str, Gap],
@@ -1557,41 +1820,58 @@ def _assess(
 ) -> tuple[Assessed, list[str]]:
     """One entity of the set: its rows, its own verdict, and the lines it owes the reader.
 
-    A skill is the one kind this command assembles, so it is the one kind asked where its
-    parts go: `_left_behind` is read off the layout of the target alone, before and whether
-    or not any bytes are asked for, because what the transfer costs is settled by the two
-    descriptions and never by `--out`.
+    Where an entity goes is read off the layout of the target alone, before and whether or
+    not any bytes are asked for, because what the transfer costs is settled by the two
+    descriptions and never by `--out`. A skill is a folder and is asked part by part
+    (`_left_behind`); a kind that crosses as one file is asked once (`_nowhere`); a kind
+    the target has no root for at all -- a command -- is never assembled and says so in its
+    row instead.
 
     An asset with no name is the named part itself rather than an entity of it -- an empty
     folder, a path the rules keep out, a file nobody declared. It is judged like any other,
-    and assembled nowhere: there is no name to assemble it under.
+    and carries no name of its own to be assembled under; what it holds is placed by the
+    rule the translation states for an undeclared file.
     """
-    properties, advice = _judge(asset.findings, gaps, target, translation)
+    properties, advice = _judge(asset.findings, gaps, target, translation, asset.kind)
     valued, said, applied = _translated(asset, target, translation)
     properties += valued
     advice += said
+    if asset.kind is Kind.RULES and asset.name:
+        # The one header this command writes rather than translates, and the one kind whose
+        # own header the reading never opened: a rule file is carried whole, so what it
+        # declares is asked here, where the file is about to be put somewhere that reads it.
+        headed, added = _trigger(asset, target, translation)
+        properties += headed
+        applied += added
+    stayed: list[str] = []
+    name, assembled = asset.name, None
+    if not asset.name:
+        pass
+    elif asset.kind is Kind.SKILL:
+        name = _skill_name(asset.path, asset.frontmatter)
+        # The whole skill having nowhere to go, and one part of it left behind, are asked in
+        # that order and never both: a target that names no root has nothing to say about
+        # where the parts inside it would have gone either.
+        stayed = _nowhere(target, asset.kind, scope)
+        if not stayed:
+            assembled = _assembled_name(name, target.environment)
+            stayed = _left_behind(target, scope, properties, _hooks_of(asset))
+    elif asset.kind in ROOT_ENTRY:
+        stayed = _nowhere(target, asset.kind, scope)
+        # The name on disk, and not one suffixed with the target environment: a skill is a
+        # folder of its own and two targets would collide on it, while one file among many
+        # in a shared folder is found by the name its own header and its callers use.
+        assembled = None if stayed else asset.path.name
     verdict = worst(entry.verdict for entry in properties)
-    if asset.kind is not Kind.SKILL or not asset.name:
-        return (
-            Assessed(asset, asset.name, None, verdict, tuple(properties), tuple(applied)),
-            advice,
-        )
-    name = _skill_name(asset.path, asset.frontmatter)
-    stayed = _left_behind(target, scope, properties, _hooks_of(asset))
     # A part with nowhere to go did not cross, whatever its row says about being reproduced:
     # exit code 0 on a run that left one behind would be this command telling a caller there
     # is nothing here to look at.
     if stayed:
         verdict = worst([verdict, Verdict.LOSSY])
-    assembled = Assessed(
-        asset,
-        name,
-        _assembled_name(name, target.environment),
-        verdict,
-        tuple(properties),
-        tuple(applied),
+    return (
+        Assessed(asset, name, assembled, verdict, tuple(properties), tuple(applied)),
+        [*advice, *stayed],
     )
-    return assembled, [*advice, *stayed]
 
 
 def convert(
@@ -1632,7 +1912,6 @@ def convert(
     # knowing what the two environments say; from there on it is the set, code 6.
     # The writing side names its own code where it writes, so it never arrives here as one.
     side = EXIT_CODE[Verdict.UNDECIDABLE]
-    ground = ""
     try:
         gaps, target_spec = _gaps(root, source, target, allow_stale)
         side = UNREADABLE
@@ -1645,13 +1924,6 @@ def convert(
                 UNREADABLE,
             )
         found = read(inputs)
-        # Asked once, and before the branch below rather than inside it: whether the target
-        # names a place for a skill file at all is read off its layout, so the answer -- and
-        # the exit code -- is the same whether or not the caller asked for the bytes. Asked
-        # only of a set that holds a skill: a set of rule files loses nothing by a target
-        # that names nowhere to put a skill.
-        if any(asset.kind is Kind.SKILL and asset.name for asset in found):
-            ground = _skills_root(target_spec, scope)
         for asset in found:
             entity, said = _assess(asset, gaps, target_spec, inputs.translation, scope)
             assessed.append(entity)
@@ -1669,19 +1941,7 @@ def convert(
             out_dir = Path(os.path.normpath(out))
             parts: list[_Part] = []
             for entity in assessed:
-                if entity.assembled_name is None:
-                    continue
-                planned, asked = _plan(
-                    entity.asset.path,
-                    out_dir,
-                    target_spec,
-                    scope,
-                    entity.properties,
-                    _hooks_of(entity.asset),
-                    root=ground,
-                    assembled_name=entity.assembled_name,
-                    translations=entity.translations,
-                )
+                planned, asked = _plan(entity, out_dir, target_spec, scope, inputs.translation)
                 parts += planned
                 advice += asked
             # One plan for the whole set, checked whole before the first byte: two skills of

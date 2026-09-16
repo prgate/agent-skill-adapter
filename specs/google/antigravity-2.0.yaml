@@ -52,6 +52,17 @@ sources:
     checked_at: 2026-09-16
     environment_version: "2.0"
     retrieved_from: shipped
+  # The same install, the guide's own page rather than one of its documents. It is the one
+  # place either side of Antigravity's documentation states what makes a rule file take
+  # effect; the public rules page says only that `GEMINI.md`/`AGENTS.md` carry no
+  # frontmatter, and says nothing about the files under `.agents/rules/`.
+  - id: rules-shipped-trigger
+    url: "~/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md"
+    anchor: "Progressive Disclosure (Skills and Rules)"
+    sha256: "b4c9807e7494b92ab4cf451378f89305b15d0023e353e8a55877e6836aebf3ee"
+    checked_at: 2026-09-16
+    environment_version: "2.0"
+    retrieved_from: shipped
   - id: subagents-frontmatter
     url: https://antigravity.google/docs/subagents
     markdown_url: https://antigravity.google/docs/subagents.md
@@ -705,6 +716,19 @@ capabilities:
     note: >-
       The counterpart topic is an app-state file the tool writes for itself (sign-in, MCP
       servers, per-project state). The settings page names no such file either way.
+  # A field of a rule file rather than of a skill or a subagent, and `settings-file` is the
+  # nearest kind the schema has for a field of the environment's own configuration.
+  - id: rules.frontmatter.trigger
+    kind: settings-file
+    support: supported
+    source_id: rules-shipped-trigger
+    # The two the sentence names, in its own spelling. What a rule file without the field
+    # does is not stated, and a set read off that silence would be a guess.
+    values: ["always_on", "model_decision"]
+    note: >-
+      When a rule file is loaded: "Rules with `trigger: model_decision` behave similarly.
+      Only `always_on` rules are loaded unconditionally." A rule file that carries neither
+      is on disk and not in effect, which is silence rather than a documented default.
 
 # Entry ids follow the vocabulary of the source environment description so that the two
 # layouts can be compared entry by entry. A root the documentation does not name simply
