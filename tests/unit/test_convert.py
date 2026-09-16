@@ -2998,3 +2998,32 @@ def test_translation_rules_that_do_not_read_end_in_a_report_and_not_a_traceback(
     assert issued["exit_code"] == 6
     assert str(broken) in issued["error"]
     assert "Traceback" not in result.stderr
+
+
+def test_a_rule_file_the_target_names_a_root_for_does_not_cost_the_run_its_verdict(
+    tmp_path: Path,
+) -> None:
+    """R19 and G02 are the transfer working, and a working transfer is not a loss.
+
+    A rule file has no format of its own to ask a description about: what decides whether it
+    crosses is whether the target names a root for rule files, and this description does --
+    the same entry the assembly puts the file at. Asked under an id no description carries,
+    the run copied the file exactly where the target says and called the transfer lossy,
+    which is the row and the place saying different things.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=(parts["policy"] / "tone.md",)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+    assert rows(result.report)["rules.project"]["target_says"] == ".agents/rules/"
+    assert (out / ".agents/rules/tone.md").exists()

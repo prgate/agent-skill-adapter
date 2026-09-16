@@ -41,6 +41,7 @@ from agent_skill_adapter.assets import (
     HOOKS_KEY,
     LINKED,
     PARTS,
+    RULES_FILE,
     SKILL_DIR,
     SKILL_FRONTMATTER,
     SKILL_MD,
@@ -407,12 +408,33 @@ def _target_alone(target: EnvSpec, entry_id: str) -> tuple[str | None, Outcome] 
     return capability.note, _TARGET_ONLY_OUTCOME[capability.support]
 
 
+ASKS_ITS_PLACE = {Kind.RULES: RULES_FILE}
+"""The id an entity of this kind asks about itself, where that question is about its place.
+
+A rule file has no format of its own for a description to document: what decides whether it
+crosses is whether the target names a root for rule files, which is the `ROOT_ENTRY` the
+assembly already puts it at. Asked under an id of its own instead -- one no description
+carries, because there is nothing there to carry -- the very same run copies the file
+exactly where the target says and calls the transfer a loss (FR-19, G02). A command is
+deliberately not here: the target names no root for one, and `command.file` staying
+unanswered is the honest whole of what happens to it.
+"""
+
+
+def _about_its_place(entry_id: str, kind: Kind, scope: Scope) -> str:
+    """``entry_id``, or the id of the place the target names, where that is the question."""
+    if ASKS_ITS_PLACE.get(kind) != entry_id:
+        return entry_id
+    return ROOT_ENTRY[kind][scope]
+
+
 def _judge(
     findings: Sequence[Finding],
     gaps: Mapping[str, Gap],
     target: EnvSpec,
     translation: Rules,
     kind: Kind,
+    scope: Scope,
 ) -> tuple[list[Property], list[str]]:
     """Every finding against the comparison, once per entry id, plus the advice it earns.
 
@@ -436,7 +458,9 @@ def _judge(
     rewritten: list[str] = []
     for finding in findings:
         for entry_id in finding.ids:
-            asked_by.setdefault(entry_id, []).append(finding.found_as)
+            asked_by.setdefault(_about_its_place(entry_id, kind, scope), []).append(
+                finding.found_as
+            )
         if finding.ids:
             continue
         # The reason first and the shape of the finding second: a reason the table knows is
@@ -2207,7 +2231,7 @@ def _assess(
     and carries no name of its own to be assembled under; what it holds is placed by the
     rule the translation states for an undeclared file.
     """
-    properties, advice = _judge(asset.findings, gaps, target, translation, asset.kind)
+    properties, advice = _judge(asset.findings, gaps, target, translation, asset.kind, scope)
     valued, said, applied = _translated(asset, target, translation)
     properties += valued
     advice += said
