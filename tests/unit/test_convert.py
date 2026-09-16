@@ -914,7 +914,7 @@ def test_a_target_environment_that_is_not_a_path_segment_is_the_descriptions_fau
 def test_a_header_whose_lines_end_in_crlf_closes_where_a_reader_sees_it_close(
     tmp_path: Path,
 ) -> None:
-    """A skill file written on Windows is a skill file: `\r\n` closes the header as `\n` does.
+    r"""A skill file written on Windows is a skill file: `\r\n` closes the header as `\n` does.
 
     The closing line of a CRLF file is `---\r\n`, and a pattern that admits only a bare
     `\n` never finds it -- the whole file reads as an unclosed header and the run refuses a
