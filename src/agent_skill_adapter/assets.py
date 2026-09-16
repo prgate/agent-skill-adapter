@@ -256,7 +256,7 @@ def _files_in(folder: Path, kind: Kind, rules: Rules) -> list[Asset]:
                 # is the one thing this reading exists to prevent, and a guard against a
                 # loop is a reason to skip a folder, never a reason to lose it.
                 notes.append(Finding(_named(entry, folder), (), LINKED))
-            elif entry.suffix == MARKDOWN:
+            elif entry.suffix == MARKDOWN and LOOKS_LIKE.get(kind, _anything)(entry):
                 found.append(READERS[kind](entry))
             else:
                 notes.append(Finding(_named(entry, folder), (), UNDECLARED))
@@ -334,6 +334,45 @@ READERS: dict[Kind, Callable[[Path], Asset]] = {
     Kind.COMMAND: lambda file: _plain(file, Kind.COMMAND, COMMAND_FILE, "command file"),
 }
 """How a file inside a named folder is read, by the part of the composition that named it."""
+
+
+def _anything(file: Path) -> bool:
+    """Every file of the right format is one of these, there being nothing else to go by.
+
+    A command of the source environment is Markdown with an optional header, so a file in a
+    folder of commands that carries none is a command all the same, and demanding one would
+    refuse to carry the plainest kind of command there is.
+    """
+    return True
+
+
+def _carries_a_header(file: Path) -> bool:
+    """Whether ``file`` opens with the line a frontmatter opens with.
+
+    The one thing that tells a subagent from a file somebody put beside their subagents: a
+    subagent is its header, and a `README.md` explaining the folder is not one that fails to
+    parse. Asked before the file is read as an entity, so that the answer for it is the row
+    every other undeclared path in a named folder gets (FR-3a) rather than a refusal that
+    would cost the run every subagent in the folder.
+
+    Read as bytes and only the first of them: what opens the file is a question about its
+    first three bytes, and a file that is not text at all has to be able to answer it too.
+    """
+    try:
+        with file.open("rb") as opened:
+            return opened.read(len(OPENS_A_HEADER)) == OPENS_A_HEADER
+    except OSError as error:
+        raise ReadError(f"{file}: could not be read ({error})") from error
+
+
+OPENS_A_HEADER = b"---"
+LOOKS_LIKE: dict[Kind, Callable[[Path], bool]] = {Kind.SUBAGENT: _carries_a_header}
+"""What a file in a named folder has to look like to be read as an entity of that folder.
+
+By the kind the option named, like everything else here, and never by the name of the file:
+a folder of subagents is free to hold a `README.md`, a diagram or a licence beside them, and
+each of those is a path nobody declared rather than an entity this run could not read.
+"""
 
 
 def _dropped(root: Path, rules: Rules) -> list[Finding]:

@@ -26,11 +26,13 @@ import os.path
 import re
 import shutil
 import sys
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+import yaml
 
 from agent_skill_adapter.assets import (
     BLOCK,
@@ -603,6 +605,56 @@ REFUSED_BY_THE_TARGET = (
 )
 """Why a counterpart the target's own set does not carry is not applied (Decisions 1)."""
 
+TOOL_FORM_ENTRY = f"{TOOL_NAMES_ENTRY}.form"
+"""The entry whose value is the shape the tool names of a subagent are written in.
+
+An entry of the target description like any other, and asked of it like any other: what
+shapes the field may be written in is something the documentation of an environment either
+names or does not, and this command reads the answer rather than holding one. The field
+itself is `TOOL_NAMES_ENTRY`; this is the one thing about its value that is not one of the
+names inside it.
+
+# ponytail: one field has a form worth asking about today, so one id is spelled here. The
+# way up, should a second field need it, is a suffix applied to whichever entry is being
+# translated, which costs nothing here and would be a rule nobody has needed yet.
+"""
+
+AS_A_LIST = "list"
+AS_A_STRING = "comma-separated string"
+"""The two shapes a field of names is written in, in the words the descriptions use.
+
+Words about a format and not about a vendor: a list and a string of names separated by
+commas are shapes of YAML, and both source environments of this pair write the field either
+way. Which of them a target accepts is its description's to say, and turning one into the
+other is the translation rules' -- these are only the names the two sides say it in.
+"""
+
+NO_FORM_SET = (
+    "the target description names no set of forms this field's value may be written in, so "
+    "it crosses in the form the source wrote it -- and the form is not a matter of taste "
+    "here: an environment that reads the field as a list of names and is handed one string "
+    "of them has no field at all, and a file it will not read is a file it says nothing "
+    "about. Name the forms in the description of the target to have this run translate them"
+)
+"""Why the shape of a value the target says nothing about is a row and not a silent carry.
+
+The same rule as every other value (Decisions 1): silence about a set is not permission to
+use it. The row says what the silence costs, because this is the one value whose form
+decides whether the entity is read at all.
+"""
+
+NO_WAY_TO_WRITE = (
+    "the rules turn the form of this value into one this command has no way of writing "
+    "down, so it crosses in the form the source wrote it; what the forms are called is for "
+    "the descriptions and the rules to say and writing one out is code, so the two have "
+    "drifted apart and this row is the whole of what is left to say about it"
+)
+"""Why a form named by both documents and unknown to the writer below is a row.
+
+Reported rather than applied: a rule recorded as applied and never written would be the
+report claiming a file this run did not produce.
+"""
+
 _HOW_TO_KEEP_A_TOOL_NAME = (
     "Remove the unpaired tool name from the header, or replace it by hand with a tool the "
     "target documents: the two are a decision about what the subagent may do, which is not "
@@ -672,6 +724,43 @@ def _unusable(entry_id: str, found_as: str, note: str) -> Property:
     )
 
 
+def _onto(
+    entry_id: str,
+    was: str,
+    found_as: str,
+    target: EnvSpec,
+    translation: Rules,
+    apply: Callable[[str, str, str], None],
+    *,
+    no_set: str = NO_VALUE_SET,
+    writable: Container[str] | None = None,
+) -> Property | None:
+    """``was`` put into the target's vocabulary: the rule is applied, or a row says why not.
+
+    The one ladder every translated value goes down, and the order of its rungs is the order
+    the two documents answer in. The description decides what the acceptable values are,
+    because that is a fact about the environment; the rules decide what an unacceptable one
+    becomes, because that is a decision of ours; and a counterpart the description's own set
+    does not carry is not written, because the two disagree and neither is this run's to
+    correct. ``writable`` is the last rung and belongs to neither document: a counterpart
+    both of them name and this command cannot write down is a row rather than a promise.
+    """
+    allowed = _closed_set(target, entry_id)
+    if allowed is None:
+        return _unusable(entry_id, found_as, no_set)
+    if was in allowed:
+        return None
+    became = translation.value_of(entry_id, was)
+    if became is None:
+        return _unusable(entry_id, found_as, NO_COUNTERPART)
+    if became not in allowed:
+        return _unusable(entry_id, found_as, REFUSED_BY_THE_TARGET)
+    if writable is not None and became not in writable:
+        return _unusable(entry_id, found_as, NO_WAY_TO_WRITE)
+    apply(entry_id, was, became)
+    return None
+
+
 def _translated(
     asset: Asset, target: EnvSpec, translation: Rules
 ) -> tuple[list[Property], list[str], list[dict[str, str]]]:
@@ -717,22 +806,35 @@ def _translated(
                     advice += [line for line in _HOW_TO_KEEP_A_TOOL_NAME if line not in advice]
                 else:
                     apply(entry_id, name, became)
+            # The shape the names are written in, asked apart from the names themselves and
+            # of its own entry: an environment that reads this field as a list and is handed
+            # a string of it reads no field at all, and a subagent whose field it cannot read
+            # is one it never mentions. Which shapes it reads is the description's to name.
+            form = AS_A_LIST if isinstance(value, list) else AS_A_STRING
+            shaped = _onto(
+                TOOL_FORM_ENTRY,
+                form,
+                f"frontmatter key `{key}` written as a {form}",
+                target,
+                translation,
+                apply,
+                no_set=NO_FORM_SET,
+                writable=WRITTEN_AS,
+            )
+            rows += [] if shaped is None else [shaped]
             continue
-        allowed = _closed_set(target, entry_id)
-        if allowed is None and entry_id not in translation.value_maps:
+        if _closed_set(target, entry_id) is None and entry_id not in translation.value_maps:
             continue
         was = _text(value, asset.path, key, entry_id)
-        found_as = f"frontmatter key `{key}` set to `{was}`"
-        if allowed is None:
-            rows.append(_unusable(entry_id, found_as, NO_VALUE_SET))
-        elif was in allowed:
-            continue
-        elif (became := translation.value_of(entry_id, was)) is None:
-            rows.append(_unusable(entry_id, found_as, NO_COUNTERPART))
-        elif became not in allowed:
-            rows.append(_unusable(entry_id, found_as, REFUSED_BY_THE_TARGET))
-        else:
-            apply(entry_id, was, became)
+        row = _onto(
+            entry_id,
+            was,
+            f"frontmatter key `{key}` set to `{was}`",
+            target,
+            translation,
+            apply,
+        )
+        rows += [] if row is None else [row]
     return rows, advice, applied
 
 
@@ -1157,6 +1259,48 @@ def _in_the_value_of(header: str, key: str, was: str, became: str) -> str:
     return "\n".join(lines)
 
 
+def _as_a_list(header: str, key: str) -> str:
+    """``header`` with the one-line value of ``key`` written out as a list, item per line.
+
+    The names are read back off the line rather than carried here from where they were
+    parsed, so that a rule applied to one of them is already in what this writes: the value
+    is translated where it stands and then reshaped, and the two never have to agree about
+    an order. Written through `yaml` so a name that needs quoting gets it, and indented by
+    hand, because a block sequence under a key is what `yaml` writes at column zero.
+
+    # ponytail: a value spelled over several lines -- a folded scalar of names -- is left
+    # alone, because only the line that opens the key is read. The way up is the same one
+    # `_in_the_value_of` names: the line and column `yaml` already knows for every node.
+    """
+    lines = header.split("\n")
+    for index, line in enumerate(lines):
+        opens = _OPENS_A_KEY.match(line)
+        if opens is None or opens.group(1).strip().strip("'\"") != key:
+            continue
+        names = [name.strip() for name in opens.group(2).split(",") if name.strip()]
+        written = yaml.safe_dump(names, default_flow_style=False, allow_unicode=True)
+        lines[index] = "\n".join([f"{key}:", *(f"  {item}" for item in written.splitlines())])
+        break
+    return "\n".join(lines)
+
+
+WRITTEN_AS: dict[str, Callable[[str, str], str]] = {AS_A_LIST: _as_a_list}
+"""How a value is put into a form the target names, by the name of that form.
+
+A form the descriptions and the rules agree on and this table has no entry for is reported
+and not applied (:data:`NO_WAY_TO_WRITE`): the two documents settle what a value should
+look like, and whether this command can produce it is a fact about this command.
+"""
+
+TOOL_NAMES_KEY = TOOL_NAMES_ENTRY.rpartition(".")[2]
+"""The header key the tool names are written under, taken back off its entry id.
+
+The ids of a header field are built from the key as written (`assets`), so the last step of
+one is the key again -- the same way `_with_translations` reads a key out of every other
+rule it applies, and for the same reason: no table of pairs to keep in step with anything.
+"""
+
+
 def _text_of(path: Path) -> str:
     """The text of ``path``, with bytes that are not UTF-8 answered rather than raised.
 
@@ -1241,9 +1385,17 @@ def _with_translations(path: Path, applied: Sequence[Mapping[str, str]]) -> str 
         return None
     header, closes = found
     for rule in applied:
+        if rule["id"] == TOOL_FORM_ENTRY:
+            continue
         # The key is the last step of the entry id: the ids of a header field are built from
         # the key as written (`assets`), so this takes it back without a table of pairs.
         header = _in_the_value_of(header, rule["id"].rpartition(".")[2], rule["from"], rule["to"])
+    # The shape of a value after the values themselves, and never before: reshaping reads the
+    # names back off the line it rewrites, so a name translated afterwards would be one this
+    # run reported as translated and wrote in the spelling it came in.
+    for rule in applied:
+        if rule["id"] == TOOL_FORM_ENTRY:
+            header = WRITTEN_AS[rule["to"]](header, TOOL_NAMES_KEY)
     return f"---{header}{text[closes:]}"
 
 
@@ -1978,8 +2130,21 @@ def _lands_at(part: _Part, *, installing: bool) -> Path:
     return Path(os.path.normpath(_resolved(part.staged.parent) / part.staged.name))
 
 
+def _kept_out(ignored: Callable[[str], bool]) -> Callable[[Any, list[str]], set[str]]:
+    """The names a directory copy leaves behind, in the shape :func:`shutil.copytree` asks for.
+
+    The same question the reading of the set already asked of every path under the folder,
+    asked again at the one place the bytes are actually moved. Both have to ask it: the
+    reading is what puts the row in the report, and a directory is copied whole, so a row
+    saying a build cache stayed behind would otherwise sit above five files of it on disk.
+    Matched on the name alone, which is how the rules match every part of a path anyway --
+    and a directory kept out is never descended into, so nothing below it is asked at all.
+    """
+    return lambda _, names: {name for name in names if ignored(name)}
+
+
 def _assemble(
-    parts: Sequence[_Part], *, installing: bool
+    parts: Sequence[_Part], *, installing: bool, ignored: Callable[[str], bool]
 ) -> tuple[list[dict[str, str]], list[str]]:
     """Copy or write every planned part, once the whole plan is known to be safe to write.
 
@@ -2131,7 +2296,9 @@ def _assemble(
                 # a link exactly as reading it already did.
                 shutil.copy2(part.copied_from, part.staged, follow_symlinks=False)
             elif part.copied_from is not None and part.copied_from.is_dir():
-                shutil.copytree(part.copied_from, part.staged, symlinks=True)
+                shutil.copytree(
+                    part.copied_from, part.staged, symlinks=True, ignore=_kept_out(ignored)
+                )
             elif part.copied_from is not None:
                 shutil.copy2(part.copied_from, part.staged)
     except (OSError, ConvertError) as error:
@@ -2683,7 +2850,9 @@ def convert(
                 # able to read before it happens, and an option to ask for it is an option
                 # to forget. To the error stream, where everything for a person goes.
                 sys.stderr.write(_announced(parts))
-            written, linked = _assemble(parts, installing=where.out is None)
+            written, linked = _assemble(
+                parts, installing=where.out is None, ignored=inputs.translation.ignored
+            )
             advice += linked
             if where.out is not None and written:
                 advice.append(INSTALL_WITH)

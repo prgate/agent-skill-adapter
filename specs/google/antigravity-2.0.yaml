@@ -347,6 +347,17 @@ capabilities:
     support: supported
     source_id: subagents-frontmatter
     note: "String list of permitted tools, spelled in Antigravity tool names."
+  # A property of the value of the field above rather than a field of its own, which the
+  # closed `kind` has no word for; `subagent-field` is the nearest of the five, as it is for
+  # every other entry read off the same frontmatter table.
+  - id: subagent.frontmatter.tools.form
+    kind: subagent-field
+    support: supported
+    source_id: subagents-frontmatter
+    values: ["list"]
+    note: >-
+      The frontmatter property table types the field `string[]` and its example writes the
+      value as a YAML list, one name per item; no other form of the value is named there.
   - id: subagent.frontmatter.model
     kind: subagent-field
     support: supported

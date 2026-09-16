@@ -529,6 +529,42 @@ def test_the_skill_is_assembled_at_the_paths_the_target_description_names(tmp_pa
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
 
+def test_nothing_the_rules_keep_out_is_written_inside_a_directory_that_is(
+    tmp_path: Path,
+) -> None:
+    """A row saying a path was kept out and the same path on disk are one run contradicting itself.
+
+    The ignore list speaks while the set is read, and the bundled directory holding the path
+    is carried whole afterwards -- so the two have to agree at the copy as well, or the
+    report says a build cache stayed behind while five files of it are in the assembled
+    skill, under an exit code calling the transfer clean. Asked of the disk against the
+    rules rather than against the wording of any row: what the report calls it is not the
+    defect, being there is.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n", directories=("scripts",))
+    (folder / "scripts" / "run.sh").write_text("echo hi\n", encoding="utf-8")
+    (folder / "scripts" / "__pycache__").mkdir()
+    (folder / "scripts" / "__pycache__" / "run.cpython-310.pyc").write_bytes(b"\x00")
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    kept_out = [
+        entry["found_as"]
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if entry["outcome"] == "out-of-scope"
+    ]
+    assert kept_out == ["scripts/__pycache__/"]
+    assert (out / ".agents/skills/example-antigravity/scripts/run.sh").is_file()
+    assert [
+        path.relative_to(out).as_posix()
+        for path in sorted(out.rglob("*"))
+        if TRANSLATION.ignored(path.relative_to(out).as_posix())
+    ] == []
+
+
 def _an_ordinary_absolute_path(root: Path) -> tuple[str, Path | None, str]:
     return str(skill(root / "widget", "")), None, "widget"
 
@@ -2262,6 +2298,11 @@ MOVING = Rules.model_validate(
         "rules_version": "2.0",
         "value_maps": {
             "subagent.frontmatter.model": {"opus": "pro", "sonnet": "pro"},
+            "subagent.frontmatter.tools": {"Read": "view_file", "Grep": "grep_search"},
+            # The shape the value is written in, which is a value like any other here: the
+            # left-hand side is how the source wrote it, the right-hand side the form the
+            # target documents.
+            "subagent.frontmatter.tools.form": {"comma-separated string": "list"},
             # The empty left-hand side is the value a file that declares none has: the rule
             # says what a rule file without a trigger gets, in the same shape as every other
             # pair -- what was written, and what it becomes.
@@ -2298,6 +2339,14 @@ def destinations_tree(tmp_path: Path, agents_root: str = ".agents/agents/") -> P
             "id": "rules.frontmatter.trigger",
             "support": "supported",
             "values": ["always_on", "model_decision"],
+        }
+    )
+    target.append(
+        {
+            "kind": "subagent-field",
+            "id": "subagent.frontmatter.tools.form",
+            "support": "supported",
+            "values": ["list"],
         }
     )
     write(
@@ -2357,6 +2406,35 @@ def test_a_subagent_is_assembled_where_the_target_names_agents_with_the_value_tr
     assert "model: pro\n" in staged
     assert "model: sonnet" not in staged
     assert staged.endswith("\nYou keep notes.\n")
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_the_form_of_a_value_is_translated_like_the_value_itself(tmp_path: Path) -> None:
+    """The names inside the field are half of it; the shape the field is written in is the other.
+
+    A subagent whose `tools` is one comma-separated string reaches the target and is never
+    read, so the shape the target documents is a property of its description -- the closed
+    set of `subagent.frontmatter.tools.form` -- and turning one shape into the other is a
+    translation rule, shown in the report as every applied rule is.
+    """
+    root = destinations_tree(tmp_path)
+    folder = subagents(tmp_path / "set" / "roles", "tools: Read, Grep\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(folder,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert ("subagent.frontmatter.tools.form", "comma-separated string", "list") in [
+        (entry["id"], entry["from"], entry["to"]) for entry in result.report["translations"]
+    ]
+    assert yaml.safe_load(staged.split("---")[1])["tools"] == ["view_file", "grep_search"]
     assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
 
 

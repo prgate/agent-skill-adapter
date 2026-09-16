@@ -27,6 +27,15 @@ value_maps:
     Grep: grep_search
     Bash: run_command
 
+  # The shape the field is written in, apart from the names inside it. The source
+  # environment accepts either shape and the target's frontmatter table names only one, so
+  # a file written the other way crosses carrying a field the target cannot read -- and a
+  # subagent whose `tools` it cannot read is one it never mentions. The left-hand side is
+  # how the source wrote it, as everywhere here; the right-hand side is the one form the
+  # target's description names.
+  subagent.frontmatter.tools.form:
+    comma-separated string: list
+
   # What a rule file that names no trigger gets. The empty left-hand side is the value such
   # a file has -- none -- so the pair reads as every other pair here reads: what was
   # written, and what it becomes. The target loads `always_on` rules unconditionally and

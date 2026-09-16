@@ -230,6 +230,30 @@ def test_a_folder_that_is_no_skill_beside_the_skills_is_a_row_and_not_a_refusal(
     assert "scratch/" in said
 
 
+def test_a_markdown_file_that_is_no_subagent_beside_the_subagents_is_a_row_and_not_a_refusal(
+    tmp_path: Path,
+) -> None:
+    """The same rule as a stray folder beside the skills, one folder over (FR-3a).
+
+    A `README.md` in a folder of subagents is a file about the folder and not one of its
+    entities, and a run that refuses over it loses every subagent that was there. What tells
+    the two apart is the file itself: a subagent opens with the line its header opens with.
+    """
+    root = build(tmp_path)
+    (root / "people" / "README.md").write_text("These are the subagents.\n", encoding="utf-8")
+
+    read = assets.read(assets.Inputs(translation=rules_for(tmp_path), agents=(root / "people",)))
+
+    assert only(read, assets.Kind.SUBAGENT).name == "helper"
+    said = {
+        finding.found_as: finding.note
+        for asset in read
+        for finding in asset.findings
+        if not finding.ids
+    }
+    assert said["README.md"] == assets.UNDECLARED
+
+
 def test_a_skill_folder_the_person_named_is_still_refused_when_it_is_no_skill(
     tmp_path: Path,
 ) -> None:

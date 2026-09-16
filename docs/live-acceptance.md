@@ -137,28 +137,27 @@ That is the `description` of `.agents/agents/prg-fix.md` word for word, so the e
 read the carried file. **This contradicts the earlier conclusion of this project that no
 user subagent is ever named by this version.**
 
-The second workspace, run the same way, named only `self` and `research`. One field explains
-both results. Its subagent was carried with
+The second workspace, run the same way, once named only `self` and `research`. One field
+explained it. Its subagent had been carried with
 
 ```yaml
 tools: view_file, Write, grep_search, SendMessage
 ```
 
 because that is how the source file spelled it, while the kit's subagents spell it as a list.
-Rewriting that one line, and nothing else, in a copy of the workspace:
-
-```yaml
-tools: ["view_file", "Write", "grep_search", "SendMessage"]
-```
-
-makes the environment answer:
+Rewriting that one line by hand, and nothing else, made the environment answer:
 
 > `self`, `research`, `note-keeper`
 
 So a subagent whose `tools` is a comma-separated string is dropped without a word; the same
-subagent with `tools` as a list appears. The converter preserves whatever form the source
-wrote, so a set written the first way crosses over and disappears. Reproduce with the two
-listings above — one line changed, everything else identical.
+subagent with `tools` as a list appears. The converter now writes the second form, because
+the target's frontmatter table types the field `string[]` and its example spells the value as
+a list: the form is the closed value set of `subagent.frontmatter.tools.form` in the target
+description, and turning one form into the other is a pair in the translation rules, reported
+like every other translated value. Carried by the command in step 1 and asked again, the same
+workspace answers:
+
+> self, research, note-keeper
 
 `agy agents` prints nothing and exits 0 in both workspaces, whatever is on disk. It is not a
 usable probe on this version.
@@ -173,15 +172,19 @@ Which is what both reports print: the target names no root for a command, so no 
 is written anywhere, and each one earns a row saying to call the skill it wrapped by name.
 Report and environment agree.
 
-## Known failures of this procedure
+## Failures this procedure found, and what answered them
 
-- **A `README.md` in the subagents folder stops the whole run.** The first set has one, and
-  the run refuses with exit 6, saying the file carries no frontmatter and a skill file has to
-  open with a marker line. Per the design, something inside a named folder that does not look
-  like an entity should earn a row, not end the run. The results above were produced from a
-  copy of the set with `agents/README.md` and `commands/README.md` removed; that copy is the
-  only difference from the set as it stands.
-- **`__pycache__` is reported as dropped and written anyway.** Rows say the ignore list kept
-  it out, `written` does not list it, and five `.pyc` files are on disk under
-  `.agents/skills/*/scripts/__pycache__/`. A documented bundle directory is copied whole,
-  after the ignore list has already spoken.
+Both were found by running it and are fixed; they are kept here because the procedure is
+what turned them up, and re-running it is how a return of either would be noticed.
+
+- **A `README.md` in the subagents folder stopped the whole run** with exit 6, saying the
+  file carried no frontmatter. A file in a named folder that does not look like an entity
+  earns a row instead (FR-3a), and what a subagent looks like is the header line it opens
+  with. The first set carries `agents/README.md` and `commands/README.md` and now crosses in
+  one command with a row for each.
+- **`__pycache__` was reported as dropped and written anyway** — rows said the ignore list
+  kept it out, `written` did not list it, and five `.pyc` files were on disk under
+  `.agents/skills/*/scripts/__pycache__/`, because a bundled directory is copied whole and
+  the ignore list had only spoken while the set was read. The copy asks the same rules now.
+  The check is to compare `written` with what is under the assembled tree: every file on
+  disk has to sit under something that list names.
