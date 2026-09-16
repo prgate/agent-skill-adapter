@@ -139,6 +139,14 @@ a property of that table nobody promised.
 UNDECLARED = "no entry with this id in either description"
 """Why a property carries no words from either side: nobody documented it under that id."""
 
+NAMES_A_PATH = (SKILL_DIR, SKILL_TOP)
+"""The entry id prefixes that name a path inside a skill bundle rather than a field of it.
+
+What such an id was asked about is a file or a directory, which is what the one rule for an
+undeclared path is about (FR-30). Every other id names a header key, an event or a decision,
+and a rule about files has nothing to say about those.
+"""
+
 TARGET_ONLY = (
     "no entry with this id in the source description or what it extends; the target "
     "names one anyway, and what it says about it is what this run relies on"
@@ -511,7 +519,15 @@ def _judge(
         else:
             outcome, origin = Outcome.UNKNOWN, Origin.EXTENSION
             source_says, target_says = None, None
-            note = NO_ROOM_FOR.get(kind, UNDECLARED)
+            # An id that names a path gets the rules' own words for a file nobody declared,
+            # exactly as `_asked_nothing` gives them to one found beside the bundle: the
+            # same rule decides what happens to both, and two wordings of that rule would
+            # be two rules as soon as either of them changed.
+            note = (
+                translation.undocumented.note
+                if entry_id.startswith(NAMES_A_PATH)
+                else NO_ROOM_FOR.get(kind, UNDECLARED)
+            )
         verdict = verdict_of(outcome, origin)
         properties.append(
             Property(
@@ -1446,6 +1462,7 @@ def _plan(
             scope,
             entity.properties,
             _hooks_of(asset),
+            translation,
             root=root,
             assembled_name=entity.assembled_name,
             translations=entity.translations,
@@ -1542,37 +1559,57 @@ nothing else is the same rule in both places.
 def _undocumented(
     entity: Assessed, where_: _Where, translation: Rules
 ) -> tuple[list[_Part], list[str]]:
-    """The paths of a named part that no description declares, if the rules say to carry them.
+    """The paths of a named part that no description declares, under the rule for all of them.
 
-    The rules state one rule for such a file (FR-30) and this is where it is carried out:
-    ``skip`` leaves the file where it is, ``copy`` brings it into the result -- staged under
-    the name of the part it was found in, and never in a root of the target (:data:`
-    STAGED_NOT_PLACED`). Either way it keeps the report row it earned while the set was
-    read, because what the rule decides is where the file ends up and never whether it is
-    mentioned.
+    Which paths those are is the reading's answer -- a finding that asked no entry id and
+    gave the undeclared path as its reason -- and what becomes of them is `_carried`'s, the
+    same answer it gives the paths inside a bundle.
+    """
+    return _carried(
+        [
+            finding.found_as
+            for finding in entity.asset.findings
+            if not finding.ids and finding.note == UNDECLARED_PATH
+        ],
+        entity.asset.path,
+        where_,
+        translation,
+    )
+
+
+def _carried(
+    labels: Sequence[str], folder: Path, where_: _Where, translation: Rules
+) -> tuple[list[_Part], list[str]]:
+    """The one rule for a path the target names no place for, carried out on every one of them.
+
+    The only place that decision is made. It is asked from two sides -- of a path found
+    beside a bundle, and of one found inside it -- and a second branch for either of them
+    would be a second rule nobody chose (FR-30): that is how a `README.md` one level up came
+    to be carried across while the `README.md` inside the bundle stayed where it was.
+
+    ``folder`` is the part or the bundle the paths were found in, and ``labels`` are their
+    names inside it. ``skip`` leaves them where they are and ``copy`` brings them into the
+    result -- staged under the name of that folder, never in a root of the target
+    (:data:`STAGED_NOT_PLACED`). Either way each keeps the report row it earned while the
+    set was read: what the rule decides is where a file ends up, never whether it is named.
     """
     if translation.undocumented.action != "copy":
         return [], []
-    carried = [
-        finding.found_as
-        for finding in entity.asset.findings
-        if not finding.ids and finding.note == UNDECLARED_PATH
-    ]
     if where_.out is None:
-        return [], [f"`{found_as}` {NOWHERE_TO_STAGE}" for found_as in carried]
+        return [], [f"`{label}` {NOWHERE_TO_STAGE}" for label in labels]
     parts = []
-    for found_as in carried:
-        # The name of the named part and then the path as it was found inside it: the input
-        # laid out as it was given, which is the one arrangement of these files anybody has
-        # ever stated. Two parts holding a `README.md` each keep one apiece by it.
-        staged = f"{entity.asset.path.name}/{found_as}"
+    for label in labels:
+        # The name of the folder and then the path as it was found inside it: the input laid
+        # out as it was given, which is the one arrangement of these files anybody has ever
+        # stated. Two folders holding a `README.md` each keep one apiece by it.
+        staged = f"{folder.name}/{label}"
         parts.append(
             _Part(
-                found_as,
+                label,
                 staged,
                 _under(where_.out, staged),
                 where_.out,
-                copied_from=entity.asset.path / found_as,
+                copied_from=folder / label,
             )
         )
     return parts, [f"`{part.label}` {STAGED_NOT_PLACED}" for part in parts]
@@ -1585,6 +1622,7 @@ def _plan_skill(
     scope: Scope,
     properties: Sequence[Property],
     hooks: Mapping[str, Any],
+    translation: Rules,
     *,
     root: str,
     assembled_name: str,
@@ -1597,16 +1635,19 @@ def _plan_skill(
     a skill the layout named nowhere for never reached a plan: `_nowhere` answered for it while
     the skill was judged, and left it without the assembled name `_plan` requires.
 
-    A part the target description names no path for is not assembled: guessing where it goes
-    would be inventing the target environment's layout. It keeps its row in the report, and
-    `_left_behind` says it was left behind -- from the layout alone, whether or not anybody
-    asked for this plan, because that is a price the descriptions settle between them.
+    A part the target description names no path for is not assembled where a skill goes:
+    guessing that would be inventing the target environment's layout. What happens to it
+    instead is the one rule the translation states for a path no description gives a place
+    to (`_carried`) -- the same rule, and the same words, as for a path found beside the
+    bundle. It keeps its row either way, and `_placeless` tells the verdict it did not land
+    where the target reads it from -- from the layout alone, whether or not anybody asked
+    for this plan, because that is a price the descriptions settle between them.
     """
     parts = []
     for label, inside in _places(target, properties):
-        # The other half of the same list: what has a place is written, what has none is
-        # named by `_left_behind`. Neither side decides for itself which half a part is in,
-        # or a part could end up written and called left behind, or in neither list.
+        # The other half of the same list: what has a place is written where the target says,
+        # what has none goes through the rule below. Neither side decides for itself which
+        # half a part is in, or a part could end up in both lists, or in neither.
         if inside is None:
             continue
         where, staged, under = where_.place(root, inside, assembled_name)
@@ -1626,9 +1667,13 @@ def _plan_skill(
                 ),
             )
         )
+    staged_parts, staged_advice = _carried(
+        _placeless(target, properties), skill_dir, where_, translation
+    )
+    parts += staged_parts
     carried, hooks_file = _hook_place(target, scope, properties, hooks)
     if not carried or hooks_file is None:
-        return parts, []
+        return parts, staged_advice
     # Through `_destination` like every other part: a layout path opens with the root it is
     # measured from, and a hooks file spelled `<workspace-root>/...` or `~/...` -- as the
     # descriptions do spell it -- would otherwise reach the report with the placeholder
@@ -1640,12 +1685,14 @@ def _plan_skill(
         # it: the alternative is editing a file that belongs to the whole environment and
         # may already hold somebody else's entries, which is the one thing that rule forbids.
         return parts, [
+            *staged_advice,
             f"the hook entry of `{assembled_name}` is not written anywhere: it belongs in "
             f"{where}, a file of the whole target environment that this run will not edit, "
-            "so add it there yourself -- or assemble under `--out`, which stages it for you"
+            "so add it there yourself -- or assemble under `--out`, which stages it for you",
         ]
     hook_part = _hook_part(where_.out, where, carried)
     return [*parts, hook_part], [
+        *staged_advice,
         f"the hook entry is staged at {hook_part.staged} and not merged into "
         f"{hook_part.destination}: that file belongs to the whole target environment and "
         "may already hold entries of its own, so add this one to it yourself",
@@ -1673,6 +1720,17 @@ def _places(target: EnvSpec, properties: Sequence[Property]) -> list[tuple[str, 
     and never mentioned. That is the silent disappearance this whole module is written against.
     """
     return [(label, _layout(target, entry_id)) for entry_id, label in _wanted(properties)]
+
+
+def _placeless(target: EnvSpec, properties: Sequence[Property]) -> list[str]:
+    """Every part of the skill folder the target names no path for, by its name inside it.
+
+    Two callers and one answer: what the rule for an undeclared path is carried out on, and
+    what tells the verdict the skill did not cross whole. Spelled once, because a part
+    written by one and called left behind by the other is the silent disappearance this
+    whole module is written against.
+    """
+    return [label for label, inside in _places(target, properties) if inside is None]
 
 
 def _hook_place(
@@ -1709,42 +1767,34 @@ def _wanted(properties: Sequence[Property]) -> list[tuple[str, str]]:
     ]
 
 
-def _left_behind(
+def _unregistered_hook(
     target: EnvSpec, scope: Scope, properties: Sequence[Property], hooks: Mapping[str, Any]
 ) -> list[str]:
-    """What the target description names no place for, in the words the report says it in.
+    """The line a hook the target fires but registers nowhere earns, or nothing.
 
     Read off the layout of the target and nothing else: no ``out``, no filesystem. What the
     transfer costs is settled by the two descriptions and the skill folder, so asking for the
-    bytes cannot change it -- ``--out`` decides what is written, not what is lost. Said out
-    loud, too, because the list of what was written cannot say it: a part missing from that
-    list looks the same whether the run had nowhere to put it or never got that far.
+    bytes cannot change it -- ``--out`` decides what is written, not what is lost.
 
-    The skill file cannot turn up here: a target that names no place for one has nowhere to
-    put the skill at all, and `_nowhere` has answered for it before this is asked -- that is
-    the whole skill left where it is, not one part of it left behind while the rest crosses.
+    The one thing that can be reproduced in full and still have nowhere to go: the event a
+    hook fires on is a capability, and the file the environment registers a hook in is a
+    layout entry it owes nothing about for having declared the event. The header itself
+    crosses -- `SKILL.md` is copied whole, `hooks:` and all -- so what is lost is not the
+    text of the declaration but the only place the environment would have read it from.
+
+    A part of the folder with nowhere to go is not here and was never a thing apart: it goes
+    through the one rule for a path no description gives a place to (`_carried`), like every
+    other such path, and `_placeless` is what tells the verdict about it.
     """
-    lines = [
-        f"`{label}` stayed in the skill folder: {target.vendor}/{target.environment} names "
-        "no place for it, and a place picked for it here would be a guess about a layout "
-        "only that environment's documentation can settle"
-        for label, inside in _places(target, properties)
-        if inside is None
-    ]
-    # The one thing that can be reproduced in full and still have nowhere to go: the event a
-    # hook fires on is a capability, and the file the environment registers a hook in is a
-    # layout entry it owes nothing about for having declared the event. The header itself
-    # crosses -- `SKILL.md` is copied whole, `hooks:` and all -- so what is lost is not the
-    # text of the declaration but the only place the environment would have read it from.
     carried, hooks_file = _hook_place(target, scope, properties, hooks)
-    if carried and hooks_file is None:
-        lines.append(
-            f"the `{HOOKS_KEY}` key crosses inside {SKILL_MD} and is registered nowhere: "
-            f"{target.vendor}/{target.environment} names no file for hook entries, and that "
-            "file is where a declaration becomes a hook -- what arrives in the target is the "
-            "text of the rule, in a header nothing reads it from"
-        )
-    return lines
+    if not carried or hooks_file is not None:
+        return []
+    return [
+        f"the `{HOOKS_KEY}` key crosses inside {SKILL_MD} and is registered nowhere: "
+        f"{target.vendor}/{target.environment} names no file for hook entries, and that "
+        "file is where a declaration becomes a hook -- what arrives in the target is the "
+        "text of the rule, in a header nothing reads it from"
+    ]
 
 
 def _hooks_the_target_fires(
@@ -2616,7 +2666,7 @@ def _hooks_of(asset: Asset) -> Mapping[str, Any]:
 def _nowhere(target: EnvSpec, kind: Kind, scope: Scope, plugin: str | None) -> list[str]:
     """The line an entity whose kind the target names no root for earns, in the report's words.
 
-    The same price `_left_behind` names for one part of a skill, for a whole entity of
+    The same price `_placeless` names for one part of a skill, for a whole entity of
     another kind: the target documents no place, and a place picked here would be a guess
     about a layout only that environment's documentation can settle. A line and not a
     refusal, because the rest of the set is unaffected and stopping the run over it would
@@ -2657,7 +2707,7 @@ def _assess(
     Where an entity goes is read off the layout of the target alone, before and whether or
     not any bytes are asked for, because what the transfer costs is settled by the two
     descriptions and never by `--out`. A skill is a folder and is asked part by part
-    (`_left_behind`); a kind that crosses as one file is asked once (`_nowhere`); a kind
+    (`_placeless`); a kind that crosses as one file is asked once (`_nowhere`); a kind
     the target has no root for at all -- a command -- is never assembled and says so in its
     row instead.
 
@@ -2684,6 +2734,7 @@ def _assess(
         properties += fields
         advice += said
     stayed: list[str] = []
+    unplaced = False
     name, assembled = asset.name, None
     if not asset.name:
         pass
@@ -2695,7 +2746,8 @@ def _assess(
         stayed = _nowhere(target, asset.kind, scope, plugin)
         if not stayed:
             assembled = _assembled_name(name, target.environment)
-            stayed = _left_behind(target, scope, properties, _hooks_of(asset))
+            stayed = _unregistered_hook(target, scope, properties, _hooks_of(asset))
+            unplaced = bool(_placeless(target, properties))
     elif asset.kind is Kind.MANIFEST:
         stayed = _nowhere(target, asset.kind, scope, plugin)
         # The folder the manifest sits in, which is what the target reads a plugin by: its
@@ -2712,8 +2764,9 @@ def _assess(
     verdict = worst(entry.verdict for entry in properties)
     # A part with nowhere to go did not cross, whatever its row says about being reproduced:
     # exit code 0 on a run that left one behind would be this command telling a caller there
-    # is nothing here to look at.
-    if stayed:
+    # is nothing here to look at. Carried beside the result by the rule for an undeclared
+    # path, it still did not land where the target reads it from, so the price is the same.
+    if stayed or unplaced:
         verdict = worst([verdict, Verdict.LOSSY])
     return (
         Assessed(asset, name, assembled, verdict, tuple(properties), tuple(applied)),

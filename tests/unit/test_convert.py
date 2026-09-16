@@ -508,13 +508,13 @@ def assembly_tree(tmp_path: Path) -> Path:
 
 
 def test_the_skill_is_assembled_at_the_paths_the_target_description_names(tmp_path: Path) -> None:
-    """`SKILL.md` and `scripts/` land where the description says; `sandbox/` is left behind.
+    """`SKILL.md` and `scripts/` land where the description says; `sandbox/` lands beside them.
 
     The expected paths are read off the description written above, not recomputed the way
-    the code computes them. A directory the target names no place for is not carried over
-    on a guess -- it keeps its row in the report, and the report says it was left behind for
-    want of a destination, so that "we had nowhere to put it" cannot be mistaken for "we
-    forgot about it": both look the same in a list of what was written.
+    the code computes them. A directory the target names no place for is not put inside the
+    assembled skill on a guess: it goes where the translation rules say a path no
+    description declares goes, which is beside the result, and it keeps its row so that "we
+    had nowhere to put it" cannot be mistaken for "we forgot about it".
     """
     root = assembly_tree(tmp_path)
     folder = skill(tmp_path / "example", "name: example\n", directories=("scripts", "sandbox"))
@@ -528,6 +528,7 @@ def test_the_skill_is_assembled_at_the_paths_the_target_description_names(tmp_pa
     assert [(entry["from"], entry["to"]) for entry in result.report["written"]] == [
         ("SKILL.md", ".agents/skills/example-antigravity/SKILL.md"),
         ("scripts/", ".agents/skills/example-antigravity/scripts/"),
+        ("sandbox/", "example/sandbox/"),
     ]
     carried = out / ".agents/skills/example-antigravity/scripts/run.sh"
     assert carried.read_text(encoding="utf-8") == "echo hi\n"
@@ -3520,3 +3521,45 @@ def test_a_plugin_file_the_set_does_not_hold_earns_no_row(tmp_path: Path) -> Non
 
     assert not [entry for entry in properties(result.report) if entry.startswith("plugin.file.")]
     assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+@pytest.mark.parametrize("action", ["copy", "skip"])
+def test_a_path_inside_a_bundle_obeys_the_same_rule_as_one_beside_it(
+    tmp_path: Path, action: str
+) -> None:
+    """The one rule reaches inside the skill folder too, and says so in the same words.
+
+    A file the target names no place for used to be decided by a branch of its own, which
+    never asked the rules at all: whatever they said, a bundled `README.md` stayed where it
+    was while a `README.md` one level up was carried across. Two rules for one kind of file,
+    and neither of them chosen by anybody (FR-30).
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n", directories=("sandbox",))
+    (folder / "sandbox" / "toy.txt").write_text("toy\n", encoding="utf-8")
+    (folder / "README.md").write_text("# Example\n", encoding="utf-8")
+    out = tmp_path / "out"
+    translation = TRANSLATION.model_copy(
+        update={"undocumented": TRANSLATION.undocumented.model_copy(update={"action": action})}
+    )
+
+    result = convert_set(
+        Inputs(translation=translation, skill=(folder,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert (out / "example" / "README.md").exists() is (action == "copy")
+    assert (out / "example" / "sandbox" / "toy.txt").exists() is (action == "copy")
+    # Never inside the assembled skill: the target names no place for either of them, and
+    # putting them there anyway would be this run inventing the layout it refuses to guess.
+    assert not (out / ".agents/skills/example-antigravity/README.md").exists()
+    assert not (out / ".agents/skills/example-antigravity/sandbox").exists()
+    # One row apiece, in the words of the rule that decided them -- the same words a file
+    # found beside the bundle gets, because it is the same rule.
+    said = rows(result.report)
+    assert said["skill.top.README.md"]["note"] == translation.undocumented.note
+    assert said["skill.dir.sandbox"]["note"] == translation.undocumented.note
