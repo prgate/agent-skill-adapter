@@ -3094,6 +3094,41 @@ def test_install_at_the_user_level_writes_under_the_home_folder(
     assert (home / ".gemini/config/agents/note-keeper.md").exists()
 
 
+def test_install_follows_a_link_the_caller_made_above_the_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Somebody keeps their configuration in a repository of its own and links the root at it.
+
+    The tree an installing run writes into is already theirs, and a link they made in it is
+    their own statement about where their configuration lives -- so the run follows it and
+    the files land where it points. What the refusal used to be was a lie as well as a stop:
+    it measured the root as written and the destination through the link, and then called a
+    path inside the home folder a path leading out of it.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    elsewhere = tmp_path / "configs"
+    elsewhere.mkdir()
+    (home / ".gemini").symlink_to(elsewhere)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(parts["roles"],)),
+        SOURCE,
+        TARGET,
+        root=root,
+        install=True,
+        scope=Scope.USER,
+        allow_stale=True,
+    )
+
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+    assert (elsewhere / "config/agents/note-keeper.md").exists()
+
+
 def manifest_tree(tmp_path: Path) -> Path:
     """Descriptions where the target documents a plugin manifest and one field of one.
 
@@ -3340,34 +3375,45 @@ def test_the_plugin_folder_is_named_the_same_however_the_manifest_path_is_spelle
     assert result.exit_code == 0
 
 
-def test_a_plugins_own_files_beside_the_manifest_are_named_and_not_carried(
+def test_a_plugins_own_files_beside_the_manifest_cross_into_the_plugin_folder(
     tmp_path: Path,
 ) -> None:
-    """A working part of the plugin that this run does not carry, and must not pass over.
+    """The hooks and the MCP servers of a plugin are part of it, and part of what crosses.
 
-    The target reads a plugin's hooks and its MCP servers from the plugin folder and the
-    manifest lists neither (D02), so nothing in the composition names them and nothing
-    carries them. A run silent about that hands over a plugin that behaves differently and
-    leaves the owner to find out from the behaviour -- which is the whole failure this
-    command exists to prevent, so the row costs the run its clean verdict.
+    The target reads both from the plugin folder and the manifest lists neither (D02), so
+    the only thing that carries them is the folder this run is already writing. Left out,
+    the set arrives as a plugin whose hooks do not fire, and the owner finds that out from
+    the behaviour -- the silence this command exists to break. Copied whole and not merged:
+    unlike a skill's hook entry, these are files of this plugin alone.
     """
     root = manifest_tree(tmp_path)
     inputs = a_manifest(tmp_path, json.dumps({"name": "kit"}))
     beside = tmp_path / "note-kit"
-    (beside / "hooks.json").write_text("{}", encoding="utf-8")
-    (beside / "mcp_config.json").write_text("{}", encoding="utf-8")
+    (beside / "hooks.json").write_text('{"PreToolUse": []}', encoding="utf-8")
+    (beside / "mcp_config.json").write_text('{"mcpServers": {}}', encoding="utf-8")
     out = tmp_path / "out"
 
     result = convert_set(inputs, SOURCE, TARGET, root=root, out=out, allow_stale=True)
     found = properties(result.report)
 
-    assert found["plugin.file.hooks"] == ("unknown", "extension", "lossy")
-    assert found["plugin.file.mcp-config"] == ("unknown", "extension", "lossy")
-    assert rows(result.report)["plugin.file.hooks"]["target_says"] == "note-kit/hooks.json"
-    assert [entry["to"] for entry in result.report["written"]] == [
-        ".agents/plugins/note-kit/plugin.json"
+    assert found["plugin.file.hooks"] == ("reproduced", "extension", "clean")
+    assert found["plugin.file.mcp-config"] == ("reproduced", "extension", "clean")
+    assert sorted(entry["to"] for entry in result.report["written"]) == [
+        ".agents/plugins/note-kit/hooks.json",
+        ".agents/plugins/note-kit/mcp_config.json",
+        ".agents/plugins/note-kit/plugin.json",
     ]
-    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+    assert (out / ".agents/plugins/note-kit/hooks.json").read_text(
+        encoding="utf-8"
+    ) == '{"PreToolUse": []}'
+    # Carried is not vouched for: these two files become commands on somebody else's
+    # machine, and `clean` is a verdict about the transfer and never about what is inside.
+    assert [
+        line
+        for line in result.report["advice"]
+        if "hooks.json" in line or "mcp_config.json" in line
+    ]
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
 
 
 def test_a_plugin_file_the_set_does_not_hold_earns_no_row(tmp_path: Path) -> None:

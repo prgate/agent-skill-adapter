@@ -839,58 +839,52 @@ def _manifest(
         Finding(f"manifest field `{key}`", (f"{MANIFEST_FIELD}{key}",))
         for key in _manifest_fields(asset.path)
     ]
+    beside = _beside_a_manifest(asset, target)
+    findings += [Finding(f"`{name}` beside the manifest", (entry_id,)) for entry_id, name in beside]
     rows, advice = _judge(findings, gaps, target, translation, asset.kind, scope)
-    return [*rows, *_beside_a_manifest(asset, target, plugin)], advice
+    return rows, [*advice, *(f"`{name}` {READ_BEFORE_ENABLING}" for _, name in beside)]
 
 
-CARRIED_BY_HAND = (
-    "is a file of the plugin itself, which the target reads from the plugin folder rather "
-    "than from anything the manifest lists -- and no part of a composition names one, so "
-    "this run carries it nowhere and leaves it where it is. Copy it into the plugin folder "
-    "this run wrote, beside the manifest, having read it first: a hooks file and an MCP "
-    "configuration name commands that will then run, and what those do on the machine this "
-    "set came from is not something two documents about file formats can weigh"
+READ_BEFORE_ENABLING = (
+    "carries commands the target environment will run: a hooks file names what runs around "
+    "an action of the agent, and an MCP configuration names servers it launches. It crossed "
+    "whole and unread -- this command weighs what two documents say about file formats, and "
+    "nothing anywhere tells it what a command does -- so read it before enabling the plugin "
+    "in an environment of your own, on the footing of anything else executable somebody "
+    "hands you. The row above says it arrived, which is not the same as saying it is safe "
+    "to run"
 )
-"""Why a file found beside a manifest earns a row and never a copy.
+"""Why a file that crossed cleanly is still worth a line of its own.
 
-Named because it is there and does not cross (FR-32, FR-3): the set holds a working part of
-a plugin that the transfer does not carry, and a run silent about it would leave a person to
-find out by the plugin behaving differently. Not carried, because what it holds is commands
-to run, and this command reads no command it did not write.
+`clean` is a verdict about the transfer: the file reached the place the target documents,
+whole. It says nothing about what is inside, and these are the only files of a set whose
+contents become commands on somebody else's machine. Carried in silence, they would move the
+gap this command exists to close -- between what is on disk and what it does -- one step
+along instead of closing it (FR-3).
 """
 
 
-def _beside_a_manifest(asset: Asset, target: EnvSpec, plugin: str | None) -> list[Property]:
-    """The plugin's own files sitting beside its manifest: one row each, and no bytes moved.
+def _beside_a_manifest(asset: Asset, target: EnvSpec) -> list[tuple[str, str]]:
+    """The plugin's own files sitting beside its manifest: the entry each asks, and its name.
 
     Which files those are is the target's layout to say -- every entry under
     :data:`PLUGIN_BESIDE` -- so this asks about the names that description carries and keeps
     none of its own. A name the target documents and the set does not hold earns nothing:
-    there is no file to account for, and a row about one would be an invention.
+    there is no file to account for, and a row about one would tell the owner of a plugin
+    without hooks that their hooks did not cross.
+
+    The entry and not a row, so that the two descriptions judge these exactly as they judge
+    every other part: the target names a place for the file, which is what `reproduced`
+    means here and what puts the file in the plan. The name comes back beside it because the
+    line of advice these earn is about the file and not about the entry.
     """
-    rows = []
-    for entry in sorted(target.layout, key=lambda item: item.id):
-        if not entry.id.startswith(PLUGIN_BESIDE):
-            continue
-        name = PurePosixPath(entry.path).name
-        if not (Path(os.path.abspath(asset.path)).parent / name).is_file():
-            continue
-        outcome = Outcome.UNKNOWN
-        rows.append(
-            Property(
-                id=entry.id,
-                found_as=f"`{name}` beside the manifest",
-                outcome=outcome,
-                origin=Origin.EXTENSION,
-                verdict=verdict_of(outcome, Origin.EXTENSION),
-                source_says=None,
-                target_says=entry.path
-                if plugin is None
-                else entry.path.replace(PLUGIN_NAME, plugin),
-                note=CARRIED_BY_HAND,
-            )
-        )
-    return rows
+    folder = Path(os.path.abspath(asset.path)).parent
+    return [
+        (entry.id, PurePosixPath(entry.path).name)
+        for entry in sorted(target.layout, key=lambda item: item.id)
+        if entry.id.startswith(PLUGIN_BESIDE)
+        and (folder / PurePosixPath(entry.path).name).is_file()
+    ]
 
 
 def _rewritten(asset: Asset, properties: Sequence[Property]) -> str:
@@ -1336,7 +1330,7 @@ def _plan_manifest(
         # unanswered. Answered rather than asserted, the answer being the right one anyway.
         return [], []
     where, staged, under = where_.place(root, inside.replace(PLUGIN_NAME, plugin), plugin)
-    return [
+    parts = [
         _Part(
             entity.asset.path.name,
             where,
@@ -1345,7 +1339,23 @@ def _plan_manifest(
             copied_from=entity.asset.path,
             content=_rewritten(entity.asset, entity.properties),
         )
-    ], []
+    ]
+    # The plugin's own hooks and MCP configuration, carried whole into the folder this run
+    # is writing. Copied and not merged, unlike a skill's hook entry: that one belongs in a
+    # file of the whole environment which may already hold somebody else's entries, while
+    # these are files of this plugin, at a place the target documents, in a folder that did
+    # not exist until this run made it. Which of them cross is read off their own rows.
+    folder = Path(os.path.abspath(entity.asset.path)).parent
+    for row in entity.properties:
+        if row.id is None or not row.id.startswith(PLUGIN_BESIDE):
+            continue
+        template = _layout(target, row.id)
+        if template is None or row.verdict is not Verdict.CLEAN:
+            continue
+        name = PurePosixPath(template).name
+        where, staged, under = where_.place(root, template.replace(PLUGIN_NAME, plugin), plugin)
+        parts.append(_Part(name, where, staged, under, copied_from=folder / name))
+    return parts, []
 
 
 STAGED_NOT_PLACED = (
@@ -1945,7 +1955,32 @@ def _relinked(
     return settled, pointed, said
 
 
-def _assemble(parts: Sequence[_Part]) -> tuple[list[dict[str, str]], list[str]]:
+def _lands_at(part: _Part, *, installing: bool) -> Path:
+    """Where a part would be created, measured the way the root it is held to is measured.
+
+    Under ``out`` the parent is resolved and the last name left as written: what that asks is
+    where the file would be created, and every way a destination can lead out of the folder
+    the caller named -- an absolute layout path, a ``..`` along the way or as the last step,
+    a symbolic link partway down -- is one question answered once. A link at the destination
+    itself is not a way out but an occupied place, and resolving it here would have the run
+    report a broken promise where the promise was never reached.
+
+    A run that installs is measured as written, ``normpath`` and nothing else. The tree it
+    writes into is the caller's own, and a link they made in it says where their
+    configuration lives rather than leading a write out of a folder this command created:
+    resolved through it, a destination inside their home folder comes back outside it and the
+    check below calls a path theirs by their own arrangement a path leading away. What still
+    has teeth is what the layout itself spells -- `_live` has already collapsed the path, so
+    an absolute one or a ``..`` above the root lands outside it here exactly as under ``out``.
+    """
+    if installing:
+        return Path(os.path.normpath(part.staged))
+    return Path(os.path.normpath(_resolved(part.staged.parent) / part.staged.name))
+
+
+def _assemble(
+    parts: Sequence[_Part], *, installing: bool
+) -> tuple[list[dict[str, str]], list[str]]:
     """Copy or write every planned part, once the whole plan is known to be safe to write.
 
     Two questions are asked of every destination before the first byte of the first one is
@@ -1954,6 +1989,12 @@ def _assemble(parts: Sequence[_Part]) -> tuple[list[dict[str, str]], list[str]]:
     from. Both run over the whole plan, because
     a run that wrote two files and then refused the third would have done the damage it
     refused to do.
+
+    ``installing`` says which of the two roots that is, and with it how far a destination is
+    followed before it is measured: through the symbolic links of a tree this command made,
+    and never through those of a tree that was the caller's before it ran. `_lands_at` holds
+    the whole of that reasoning, and `_links_on_the_way` below is the same question asked
+    again of a staged run, level by level, as late as it can be asked.
 
     A symbolic link counts as an occupied place even when it points at nothing: ``exists``
     answers ``False`` for a broken one, and writing to it would create its target somewhere
@@ -1981,25 +2022,17 @@ def _assemble(parts: Sequence[_Part]) -> tuple[list[dict[str, str]], list[str]]:
     plan that breaks it must not be answered with the code for a lesser fault it also has.
     Then the plan against itself, then the plan against what is already on disk.
     """
-    # The four ways a destination can lead out of `out` -- a layout path that is absolute, a
-    # `..` anywhere along the way, a `..` as the last step, a link on the way -- are one
-    # question asked once: `resolve` answers for everything above the last name and
-    # `normpath` for the last name itself.
     # Over the whole plan, and answered again level by level in `_links_on_the_way` before
-    # each part is written: this one rules out a destination that leads out of `out` at all,
-    # that one rules out the path having changed since.
-    roots = {part.root: _resolved(part.root) for part in parts}
-    # The parent resolved and the last name left as written: what this asks is where the file
-    # would be created. A link at the destination itself is not a way out of `out` but an
-    # occupied place, and the check below answers for it with the code for that; resolving it
-    # here would have the run report a broken promise where the promise was never reached.
-    # `normpath` then settles what that last name means without going near the filesystem: a
-    # `..` written there is a step back out, not a name to create, and left as text it would
-    # read as a path under `out`.
-    places = [
-        (part, Path(os.path.normpath(_resolved(part.staged.parent) / part.staged.name)))
+    # each part of a staged run is written: this one rules out a destination that leads out
+    # of `out` at all, that one rules out the path having changed since.
+    # The root is measured exactly as the destination is -- `_lands_at` says which way and
+    # why -- because a root read one way and a destination the other are two spellings of one
+    # folder, and a path under the root matches it in neither.
+    roots = {
+        part.root: Path(os.path.normpath(part.root)) if installing else _resolved(part.root)
         for part in parts
-    ]
+    }
+    places = [(part, _lands_at(part, installing=installing)) for part in parts]
     outside = [
         f"{part.staged} is not under {part.root}"
         for part, place in places
@@ -2051,7 +2084,14 @@ def _assemble(parts: Sequence[_Part]) -> tuple[list[dict[str, str]], list[str]]:
                     COLLISION,
                 )
         planned[part.staged] = part.label
-    taken = [str(part.staged) for part in parts if part.staged.exists() or part.staged.is_symlink()]
+    # A link is named as one, at the level it stands: it is the one occupied place that does
+    # not look occupied to whoever reads the folder, and a refusal that called it a file
+    # would send them looking for something that is not there.
+    taken = [
+        f"{part.staged}, which is a symbolic link" if part.staged.is_symlink() else str(part.staged)
+        for part in parts
+        if part.staged.exists() or part.staged.is_symlink()
+    ]
     if taken:
         raise ConvertError(
             "there is already something at " + ", ".join(taken) + "; nothing was written, "
@@ -2066,7 +2106,11 @@ def _assemble(parts: Sequence[_Part]) -> tuple[list[dict[str, str]], list[str]]:
             # answered for the plan as a whole, and a path is only as checked as it is fresh.
             # Before `started` grows, so that a refusal here takes back what this run wrote
             # and never the link it refused to write through.
-            _links_on_the_way(part.root, part.staged)
+            # Not asked of a run that installs: every level of that destination is the
+            # caller's own, and a link they put there is where they keep their configuration
+            # -- the same reason `_lands_at` measures such a destination as written.
+            if not installing:
+                _links_on_the_way(part.root, part.staged)
             part.staged.parent.mkdir(parents=True, exist_ok=True)
             started.append(part)
             if part.content is not None:
@@ -2639,7 +2683,7 @@ def convert(
                 # able to read before it happens, and an option to ask for it is an option
                 # to forget. To the error stream, where everything for a person goes.
                 sys.stderr.write(_announced(parts))
-            written, linked = _assemble(parts)
+            written, linked = _assemble(parts, installing=where.out is None)
             advice += linked
             if where.out is not None and written:
                 advice.append(INSTALL_WITH)
