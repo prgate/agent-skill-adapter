@@ -1811,6 +1811,210 @@ def test_the_three_things_a_row_can_say_about_being_declared_are_three_rows(
     assert (neither["outcome"], neither["verdict"]) == ("unknown", "lossy")
 
 
+TRANSLATING = Rules.model_validate(
+    {
+        "rules_version": "2.0",
+        "value_maps": {
+            "subagent.frontmatter.model": {"opus": "pro", "sonnet": "pro"},
+            "subagent.frontmatter.tools": {"Read": "view_file", "Grep": "grep_search"},
+        },
+        "undocumented": {"action": "copy", "note": "nothing declares this file"},
+    }
+)
+"""Rules that do translate something, versioned apart from the descriptions on purpose."""
+
+SUBAGENT_FIELDS = (
+    "subagent.frontmatter.name",
+    "subagent.frontmatter.description",
+    "subagent.frontmatter.model",
+    "subagent.frontmatter.tools",
+    "subagent.system-prompt-body",
+)
+
+
+def a_subagent(folder: Path, frontmatter: str) -> Inputs:
+    """A composition of one folder holding one subagent with the given extra header lines."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "note-keeper.md").write_text(
+        f"---\nname: note-keeper\ndescription: keeps notes\n{frontmatter}---\n\nYou keep notes.\n",
+        encoding="utf-8",
+    )
+    return Inputs(translation=TRANSLATING, agents=(folder,))
+
+
+def value_tree(tmp_path: Path, *, values: list[str] | None) -> Path:
+    """Descriptions of two environments that both know the subagent fields below.
+
+    ``values`` is the closed set the *target* names for the model field, or ``None`` for a
+    target that names none -- which is the whole of the difference these cases turn on.
+    """
+    root = tmp_path / "specs"
+    fields = [
+        {"kind": "subagent-field", "id": entry, "support": "supported"} for entry in SUBAGENT_FIELDS
+    ]
+    write(root, vendor="anthropic", environment="claude-code", capabilities=fields)
+    target: list[dict[str, Any]] = [dict(entry) for entry in fields]
+    if values is not None:
+        target[SUBAGENT_FIELDS.index("subagent.frontmatter.model")]["values"] = values
+    write(root, vendor="google", environment="antigravity", capabilities=target)
+    return root
+
+
+def test_a_value_outside_the_targets_set_is_translated_and_the_report_names_both_versions(
+    tmp_path: Path,
+) -> None:
+    """The applied rule is in the report -- what was there, what it became, by what rule.
+
+    And both versions with it: the descriptions decide what the closed set is, the rules
+    decide what a value outside it becomes, and the two are versioned apart, so a person
+    repeating this run needs both numbers to get the same bytes back (FR-13.1).
+    """
+    root = value_tree(tmp_path, values=["inherit", "flash", "pro"])
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "model: sonnet\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+
+    assert result.report["rules_version"] == "2.0"
+    assert result.report["target"] == {
+        "vendor": "google",
+        "environment": "antigravity",
+        "version": "1.0.0",
+    }
+    assert [
+        (entry["id"], entry["from"], entry["to"]) for entry in result.report["translations"]
+    ] == [("subagent.frontmatter.model", "sonnet", "pro")]
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_a_value_outside_the_set_and_outside_the_table_is_a_row_and_not_a_guess(
+    tmp_path: Path,
+) -> None:
+    """Nothing is invented for it and nothing is dropped: the run says what it could not do.
+
+    A value the target does not accept and the rules have no counterpart for is exactly the
+    case a converter is tempted to resolve by picking the nearest-sounding word. The answer
+    is a row naming the value and the reason, and a verdict that is not `clean` (FR-12).
+    """
+    root = value_tree(tmp_path, values=["inherit", "flash", "pro"])
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "model: haiku\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+    row = next(
+        entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if "haiku" in entry["found_as"]
+    )
+
+    assert result.report["translations"] == []
+    assert (row["id"], row["outcome"], row["verdict"]) == (
+        "subagent.frontmatter.model",
+        "unknown",
+        "lossy",
+    )
+    assert row["note"] == convert_module.NO_COUNTERPART
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+
+
+def test_a_field_the_target_names_no_value_set_for_is_left_alone_and_says_why(
+    tmp_path: Path,
+) -> None:
+    """No set, no translation: silence about the set is not permission to translate.
+
+    The rules do carry a counterpart for this very value, and it is still not applied --
+    which is the whole of the boundary. Without a documented set there is nothing that makes
+    the written value wrong, so a rewrite would be a rule of ours passed off as a fact about
+    the target environment (FR-11.2).
+    """
+    root = value_tree(tmp_path, values=None)
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "model: sonnet\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+    row = next(
+        entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if "sonnet" in entry["found_as"]
+    )
+
+    assert result.report["translations"] == []
+    assert (row["outcome"], row["verdict"]) == ("unknown", "lossy")
+    assert row["note"] == convert_module.NO_VALUE_SET
+
+
+def test_a_value_that_is_not_text_is_refused_with_the_file_and_the_field_named(
+    tmp_path: Path,
+) -> None:
+    """A number where a tier was expected is a refusal a person can act on (FR-11.1).
+
+    Both halves of the address are asserted: a message naming only the field sends a person
+    grepping a set for it, and one naming only the file leaves them reading a header.
+    """
+    root = value_tree(tmp_path, values=["inherit", "flash", "pro"])
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "model: 3\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+
+    assert result.exit_code == 6
+    assert str(tmp_path / "roles" / "note-keeper.md") in result.report["error"]
+    assert "`model`" in result.report["error"]
+
+
+def test_a_tool_name_without_a_documented_pair_stays_as_it_is_and_is_named(
+    tmp_path: Path,
+) -> None:
+    """The names the rules pair are translated; the rest cross unchanged, each with a row.
+
+    Dropping an unpaired name would quietly narrow what the subagent may do, and pairing it
+    by how it sounds would hand the target a tool it never documented. Both are silent, and
+    the report is what this command has instead of silence (FR-17, FR-18).
+    """
+    root = value_tree(tmp_path, values=["inherit", "flash", "pro"])
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "tools: Read, Write, Grep, SendMessage\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+    unpaired = {
+        entry["found_as"]: entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if entry["note"] == convert_module.NO_TOOL_COUNTERPART
+    }
+
+    assert [(entry["from"], entry["to"]) for entry in result.report["translations"]] == [
+        ("Read", "view_file"),
+        ("Grep", "grep_search"),
+    ]
+    assert set(unpaired) == {"tool name `Write`", "tool name `SendMessage`"}
+    assert unpaired["tool name `Write`"]["id"] == "subagent.frontmatter.tools"
+    assert result.report["advice"] == list(convert_module._HOW_TO_KEEP_A_TOOL_NAME)
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+
+
 def cli_arguments(folder: Path, root: Path) -> list[str]:
     """The one run both command-line tests make, as a list of arguments."""
     return [

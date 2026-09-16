@@ -38,8 +38,10 @@ from agent_skill_adapter.assets import (
     LINKED,
     PARTS,
     SKILL_DIR,
+    SKILL_FRONTMATTER,
     SKILL_MD,
     SKILL_TOP,
+    SUBAGENT_FRONTMATTER,
     Asset,
     Finding,
     Inputs,
@@ -51,7 +53,7 @@ from agent_skill_adapter.assets import UNDECLARED as UNDECLARED_PATH
 from agent_skill_adapter.envspec.gaps import Gap, Origin, Outcome, compare
 from agent_skill_adapter.envspec.loader import base_specs, select
 from agent_skill_adapter.envspec.model import EnvSpec, Support
-from agent_skill_adapter.rules import Rules
+from agent_skill_adapter.rules import TOOL_NAMES_ENTRY, Rules
 
 REPORT_SCHEMA = 2
 """Version of the report format below. A field that changes meaning changes this number.
@@ -271,6 +273,10 @@ class Assessed:
     gives it -- and is empty for a record of a named part rather than of an entity in it.
     ``assembled_name`` is that name suffixed with the target environment, and ``None`` for
     everything this run assembles nothing for.
+
+    ``translations`` are the rules that were applied to its header, one per value rewritten.
+    A rule that was applied cost the transfer nothing, so it leaves no row among the
+    ``properties``; it leaves this instead, which is how the report shows the work (FR-14).
     """
 
     asset: Asset
@@ -278,6 +284,7 @@ class Assessed:
     assembled_name: str | None
     verdict: Verdict
     properties: tuple[Property, ...]
+    translations: tuple[dict[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -469,6 +476,181 @@ def _asked_nothing(finding: Finding, translation: Rules) -> Property:
         target_says=None,
         note=note,
     )
+
+
+FRONTMATTER = {Kind.SKILL: SKILL_FRONTMATTER, Kind.SUBAGENT: SUBAGENT_FRONTMATTER}
+"""Which entry ids an entity's header keys are spelled under, by the kind of entity.
+
+The other kinds carry no header this command reads (`assets._plain`), so a kind absent here
+has no field whose value could be translated.
+"""
+
+NO_VALUE_SET = (
+    "the target description names no closed set of values for this field, so there is "
+    "nothing here to tell an acceptable value from one that has to be translated; the value "
+    "crosses as it was written, and a translation applied without a documented set would be "
+    "a rule of ours dressed as a fact about the environment"
+)
+"""Why a field the rules can translate is left alone when the target documents no value set.
+
+Silence about the set is not permission to use it (Decisions 1): the row is `unknown` and
+says which of the two documents is missing, so that the fix is to the description and not
+to a guess here.
+"""
+
+NO_COUNTERPART = (
+    "the value is outside the closed set the target documents, and the translation rules "
+    "name no counterpart for it: it is neither invented here nor dropped, so the file "
+    "crosses carrying a value the target does not accept"
+)
+"""Why a value outside the set and outside the table is a row rather than a silence (FR-12)."""
+
+NO_TOOL_COUNTERPART = (
+    "the translation rules name no counterpart for this tool name, so it stays as it is; "
+    "the target warns that a tool name it does not know may leave the subagent hanging on "
+    "the call, and a pair guessed by how the two names sound would be that same hang with "
+    "nobody left to blame it on"
+)
+"""Why an unpaired tool name is carried and named rather than translated or removed (FR-18)."""
+
+REFUSED_BY_THE_TARGET = (
+    "the translation rules turn this value into one the closed set of the target does not "
+    "contain, so applying them would write a value the target rejects; the rules and the "
+    "description disagree, and which of them is out of date is not a thing this run can tell"
+)
+"""Why a counterpart the target's own set does not carry is not applied (Decisions 1)."""
+
+_HOW_TO_KEEP_A_TOOL_NAME = (
+    "Remove the unpaired tool name from the header, or replace it by hand with a tool the "
+    "target documents: the two are a decision about what the subagent may do, which is not "
+    "this command's to make.",
+)
+"""The ways out of an unpaired tool name, named and not chosen between, as hooks are."""
+
+
+def _closed_set(target: EnvSpec, entry_id: str) -> tuple[str, ...] | None:
+    """The values the target documents for ``entry_id``, or ``None`` when it documents none."""
+    entry = next((item for item in target.capabilities if item.id == entry_id), None)
+    if entry is None or entry.values is None:
+        return None
+    return tuple(entry.values)
+
+
+def _text(value: Any, path: Path, key: str, entry_id: str) -> str:
+    """``value`` as the text a closed set is read against, or a refusal naming where it is.
+
+    A value that is not text cannot be looked up in a set of words nor found in a table of
+    them, and passing it through unexamined would be this command deciding in silence that
+    it needs no translation. The refusal names the file and the key, because that is the
+    line somebody has to open and edit (FR-11.1).
+    """
+    if isinstance(value, str):
+        return value
+    raise ConvertError(
+        f"{path}: frontmatter key `{key}` reads as {type(value).__name__}, and `{entry_id}` "
+        "is a field whose values are translated as text; quote the value if it is meant as "
+        "text, or remove the key",
+        UNREADABLE,
+    )
+
+
+def _tool_names(value: Any, path: Path, key: str) -> list[str]:
+    """The tool names a header value holds, written either way the source environment allows.
+
+    One string of names separated by commas, or a list of them; anything else is refused at
+    the address it is written, like any other value this command cannot read as text.
+    """
+    if isinstance(value, list) and all(isinstance(name, str) for name in value):
+        spelled: list[str] = value
+    else:
+        spelled = _text(value, path, key, TOOL_NAMES_ENTRY).split(",")
+    return [name.strip() for name in spelled if name.strip()]
+
+
+def _unusable(entry_id: str, found_as: str, note: str) -> Property:
+    """The row a value that did not cross in the target's own vocabulary earns.
+
+    ``unknown`` from an ``extension``, whatever the entry's own row said about the field:
+    the field crossing and its value crossing are two questions, and the vocabulary of
+    values is each product's own -- the open specification declares fields, never the words
+    one environment happens to spell a model tier or a tool with. So this is the ordinary
+    price of moving between two products (`lossy`), and never the refusal an entry of the
+    specification earns.
+    """
+    return Property(
+        id=entry_id,
+        found_as=found_as,
+        outcome=Outcome.UNKNOWN,
+        origin=Origin.EXTENSION,
+        verdict=verdict_of(Outcome.UNKNOWN, Origin.EXTENSION),
+        source_says=None,
+        target_says=None,
+        note=note,
+    )
+
+
+def _translated(
+    asset: Asset, target: EnvSpec, translation: Rules
+) -> tuple[list[Property], list[str], list[dict[str, str]]]:
+    """Every header value of one entity put into the target's vocabulary: rows, advice, rules.
+
+    Two documents decide this between them and neither decides it alone. The description of
+    the target names the closed set a field's values come from, which is what makes a value
+    wrong rather than merely different; the rules name what a value outside that set becomes,
+    which is a decision of ours and so is versioned apart from either description (FR-6).
+    A field neither of them says anything about is not touched: a header key is not a thing
+    to translate just because it is there.
+
+    Tool names are the one field asked without a closed set, because the target documents
+    its tools under its own supported tool set rather than as the values of that field. The
+    rules carry only pairs whose right-hand side the target documents, so a name absent from
+    them has no documented counterpart and crosses as it was written, with a row saying so.
+    """
+    prefix = FRONTMATTER.get(asset.kind)
+    if prefix is None:
+        return [], [], []
+    rows: list[Property] = []
+    advice: list[str] = []
+    applied: list[dict[str, str]] = []
+
+    def apply(entry_id: str, was: str, became: str) -> None:
+        applied.append(
+            {
+                "path": str(asset.path),
+                "id": entry_id,
+                "from": was,
+                "to": became,
+                "rule": f"{entry_id} of the translation rules {translation.version}",
+            }
+        )
+
+    for key, value in asset.frontmatter.items():
+        entry_id = f"{prefix}{key}"
+        if entry_id == TOOL_NAMES_ENTRY:
+            for name in _tool_names(value, asset.path, key):
+                became = translation.tool_name(name)
+                if became is None:
+                    rows.append(_unusable(entry_id, f"tool name `{name}`", NO_TOOL_COUNTERPART))
+                    advice += [line for line in _HOW_TO_KEEP_A_TOOL_NAME if line not in advice]
+                else:
+                    apply(entry_id, name, became)
+            continue
+        allowed = _closed_set(target, entry_id)
+        if allowed is None and entry_id not in translation.value_maps:
+            continue
+        was = _text(value, asset.path, key, entry_id)
+        found_as = f"frontmatter key `{key}` set to `{was}`"
+        if allowed is None:
+            rows.append(_unusable(entry_id, found_as, NO_VALUE_SET))
+        elif was in allowed:
+            continue
+        elif (became := translation.value_of(entry_id, was)) is None:
+            rows.append(_unusable(entry_id, found_as, NO_COUNTERPART))
+        elif became not in allowed:
+            rows.append(_unusable(entry_id, found_as, REFUSED_BY_THE_TARGET))
+        else:
+            apply(entry_id, was, became)
+    return rows, advice, applied
 
 
 def _layout(spec: EnvSpec, entry_id: str) -> str | None:
@@ -1097,6 +1279,7 @@ def _gaps(
 def _report(
     source: str | None,
     target: str | None,
+    rules_version: str,
     verdict: Verdict,
     exit_code: int,
     assessed: Sequence[Assessed],
@@ -1113,6 +1296,12 @@ def _report(
     with the target environment, the one every destination in ``written`` is built from;
     ``None`` for anything this run assembles nothing for. Carried apart and not merged into
     one field, because the second is a property of *this* conversion and the first is not.
+
+    ``rules_version`` stands beside the two environment versions and not inside them: what a
+    value outside a closed set becomes is our decision and moves when we change our mind,
+    while a description moves when a vendor changes their documentation. Repeating a past
+    transfer needs all three numbers, and a report naming two of them would let a person
+    reproduce the run they think they ran (FR-13.1).
     """
     return {
         "report_schema": REPORT_SCHEMA,
@@ -1120,6 +1309,8 @@ def _report(
         "exit_code": exit_code,
         "source": _environment(source),
         "target": _environment(target),
+        "rules_version": rules_version,
+        "translations": [row for entry in assessed for row in entry.translations],
         "assets": [
             {
                 "kind": entry.asset.kind.value,
@@ -1195,6 +1386,10 @@ def _summary(report: dict[str, Any]) -> str:
             + (f"; {entry['note']}" if entry["note"] else "")
             for entry in asset["properties"]
         ]
+    lines += [
+        f"  translated `{entry['from']}` to `{entry['to']}` in {entry['path']} (by {entry['rule']})"
+        for entry in report["translations"]
+    ]
     lines += [
         f"  wrote {entry['path']} (it belongs at {entry['to']})" for entry in report["written"]
     ]
@@ -1284,9 +1479,15 @@ def _assess(
     and assembled nowhere: there is no name to assemble it under.
     """
     properties, advice = _judge(asset.findings, gaps, target, translation)
+    valued, said, applied = _translated(asset, target, translation)
+    properties += valued
+    advice += said
     verdict = worst(entry.verdict for entry in properties)
     if asset.kind is not Kind.SKILL or not asset.name:
-        return Assessed(asset, asset.name, None, verdict, tuple(properties)), advice
+        return (
+            Assessed(asset, asset.name, None, verdict, tuple(properties), tuple(applied)),
+            advice,
+        )
     name = _skill_name(asset.path, asset.frontmatter)
     stayed = _left_behind(target, scope, properties, _hooks_of(asset))
     # A part with nowhere to go did not cross, whatever its row says about being reproduced:
@@ -1295,7 +1496,12 @@ def _assess(
     if stayed:
         verdict = worst([verdict, Verdict.LOSSY])
     assembled = Assessed(
-        asset, name, _assembled_name(name, target.environment), verdict, tuple(properties)
+        asset,
+        name,
+        _assembled_name(name, target.environment),
+        verdict,
+        tuple(properties),
+        tuple(applied),
     )
     return assembled, [*advice, *stayed]
 
@@ -1419,8 +1625,26 @@ def convert(
         # codes those are is `REFUSAL_VERDICT`, and the rest leave the computed one alone.
         verdict = REFUSAL_VERDICT.get(stopped.exit_code, verdict)
         report = _report(
-            source, target, verdict, stopped.exit_code, assessed, advice, written, str(stopped)
+            source,
+            target,
+            inputs.translation.version,
+            verdict,
+            stopped.exit_code,
+            assessed,
+            advice,
+            written,
+            str(stopped),
         )
         return Conversion(verdict, stopped.exit_code, report, _summary(report))
-    report = _report(source, target, verdict, EXIT_CODE[verdict], assessed, advice, written, None)
+    report = _report(
+        source,
+        target,
+        inputs.translation.version,
+        verdict,
+        EXIT_CODE[verdict],
+        assessed,
+        advice,
+        written,
+        None,
+    )
     return Conversion(verdict, EXIT_CODE[verdict], report, _summary(report))
