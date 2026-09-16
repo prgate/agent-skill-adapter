@@ -1,0 +1,62 @@
+# Translation rules for Claude Code -> Antigravity.
+#
+# Versioned apart from the environment descriptions on purpose: a description states what
+# an environment documents, while this file states what we decided to do about it. The two
+# change for different reasons and at different times, so they carry different versions.
+rules_version: "1.0"
+
+# Value translations, keyed by the description entry whose value they rewrite. A key that
+# no description declares is dead weight, and a value the target does not accept is caught
+# by the closed value set in the description, never here.
+value_maps:
+  subagent.frontmatter.model:
+    # Both Claude Code tiers land on the one Antigravity tier that is not `inherit`:
+    # `flash` is the cheaper tier and would silently downgrade the agent the set shipped.
+    # A user decision, recorded here rather than in either description (see docs/adr).
+    opus: pro
+    sonnet: pro
+
+  # Tool names are a field with a closed value set, like `model`, so they translate through
+  # the same mechanism. Only pairs whose right-hand side the target documents under its own
+  # supported tool set appear here; a source name with no documented counterpart is absent
+  # on purpose, and `tool_name` answers "no pair" for it rather than inventing one by
+  # sound. The target's documentation never pairs its spelling with another environment's,
+  # so the pairing itself is our decision and belongs in this file, not in a description.
+  subagent.frontmatter.tools:
+    Read: view_file
+    Grep: grep_search
+    Bash: run_command
+
+# Build leftovers and tool caches. Matched against every part of a relative path, so a
+# name here covers the whole directory under it. Declared here so that no such name has to
+# be spelled in code.
+ignore:
+  - __pycache__
+  - "*.py[co]"
+  - .pytest_cache
+  - .mypy_cache
+  - .ruff_cache
+  - .omc
+  - .DS_Store
+  - .git
+
+# Which files link substitution may rewrite, and which it may not. `exclude` wins over
+# `include`: a change history is a record of what was written, and rewriting it would make
+# it a record of what we wish had been written.
+rewrite:
+  include:
+    - "*.md"
+  exclude:
+    - CHANGELOG.md
+    - CHANGELOG
+    - HISTORY.md
+    - NEWS.md
+
+# One rule for every file that no description has an entry for. Carrying it along keeps the
+# set whole; the report row is what keeps the carry from being silent.
+undocumented:
+  action: copy
+  note: >-
+    No environment description declares this file, so nothing states where the target
+    reads it from. It is copied beside the asset it came with; move it by hand if the
+    target expects it elsewhere.
