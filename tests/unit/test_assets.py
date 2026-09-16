@@ -47,6 +47,19 @@ model: sonnet
 You are a helper.
 """
 
+COMMAND = """\
+---
+description: does it
+---
+
+Do it.
+"""
+"""One command file, opening with the header that makes it an entity of its folder.
+
+A file in that folder without one says nothing about being a command, so it is read as a
+path nobody declared rather than counted among them.
+"""
+
 
 def rules_for(tmp_path: Path) -> Rules:
     path = tmp_path / "translation.yaml"
@@ -67,7 +80,7 @@ def build(tmp_path: Path) -> Path:
     (root / "people" / "helper.md").write_text(SUBAGENT, encoding="utf-8")
 
     (root / "verbs").mkdir()
-    (root / "verbs" / "do.md").write_text("do it", encoding="utf-8")
+    (root / "verbs" / "do.md").write_text(COMMAND, encoding="utf-8")
 
     (root / "laws").mkdir()
     (root / "laws" / "tone.md").write_text("be kind", encoding="utf-8")
@@ -245,6 +258,37 @@ def test_a_markdown_file_that_is_no_subagent_beside_the_subagents_is_a_row_and_n
     read = assets.read(assets.Inputs(translation=rules_for(tmp_path), agents=(root / "people",)))
 
     assert only(read, assets.Kind.SUBAGENT).name == "helper"
+    said = {
+        finding.found_as: finding.note
+        for asset in read
+        for finding in asset.findings
+        if not finding.ids
+    }
+    assert said["README.md"] == assets.UNDECLARED
+
+
+def test_a_file_with_no_header_beside_the_commands_is_not_counted_as_one(tmp_path: Path) -> None:
+    """The row for it says nobody declared it, and the set holds exactly as many commands as before.
+
+    A command may be written with no header and still be a command, but a file with no header
+    is indistinguishable from any other Markdown in the folder -- so calling it one would put
+    it in the report as the one thing this reading can be sure it is not, and every count
+    taken over the commands of the set would count it.
+    """
+
+    def commands_of(read: tuple[assets.Asset, ...]) -> list[str]:
+        return [asset.name for asset in read if asset.kind is assets.Kind.COMMAND and asset.name]
+
+    root = build(tmp_path)
+    inputs = assets.Inputs(translation=rules_for(tmp_path), commands=(root / "verbs",))
+    before = commands_of(assets.read(inputs))
+
+    (root / "verbs" / "README.md").write_text("These are the commands.\n", encoding="utf-8")
+
+    read = assets.read(inputs)
+
+    assert before == ["do"]
+    assert commands_of(read) == before
     said = {
         finding.found_as: finding.note
         for asset in read

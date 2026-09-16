@@ -37,6 +37,14 @@ TRANSLATION = Rules.model_validate(
 )
 """The translation rules every run here is given: the smallest ones that are valid."""
 
+COMMAND = "---\ndescription: does the thing\n---\n\nDo the thing.\n"
+"""One command file. It opens with a header, which is what makes it an entity of its folder.
+
+A command of the source environment may be written without one and still work there; a file
+without one is read here as a path nobody declared, because nothing in it says it is a
+command rather than a note left beside them.
+"""
+
 
 def convert(
     skill_dir: str | Path, source: str | None, target: str | None, **named: Any
@@ -2562,7 +2570,7 @@ def test_every_command_earns_one_refusal_and_no_command_is_ever_written(
     commands = tmp_path / "set" / "shortcuts"
     commands.mkdir(parents=True)
     for name in names:
-        (commands / name).write_text("Do the thing.\n", encoding="utf-8")
+        (commands / name).write_text(COMMAND, encoding="utf-8")
     out = tmp_path / "out"
 
     result = convert_set(
@@ -2747,7 +2755,7 @@ def test_an_address_of_a_file_that_stayed_where_it_was_is_left_exactly_as_writte
     root = destinations_tree(tmp_path)
     shortcuts = tmp_path / "set" / "shortcuts"
     shortcuts.mkdir(parents=True)
-    (shortcuts / "note.md").write_text("Take a note.\n", encoding="utf-8")
+    (shortcuts / "note.md").write_text(COMMAND, encoding="utf-8")
     roles = linking_subagents(tmp_path / "set" / "roles", "../shortcuts/note.md")
     out = tmp_path / "out"
 
@@ -2883,7 +2891,7 @@ def a_set_on_disk(tmp_path: Path) -> dict[str, Path]:
     skill(home / "bundles" / "note-taker", "name: note-taker\n")
     subagents(home / "roles")
     (home / "shortcuts").mkdir(parents=True)
-    (home / "shortcuts" / "note.md").write_text("Take a note.\n", encoding="utf-8")
+    (home / "shortcuts" / "note.md").write_text(COMMAND, encoding="utf-8")
     (home / "policy").mkdir(parents=True)
     (home / "policy" / "tone.md").write_text("Be brief.\n", encoding="utf-8")
     return {name: home / name for name in ("bundles", "roles", "shortcuts", "policy")}

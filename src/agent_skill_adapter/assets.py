@@ -256,7 +256,7 @@ def _files_in(folder: Path, kind: Kind, rules: Rules) -> list[Asset]:
                 # is the one thing this reading exists to prevent, and a guard against a
                 # loop is a reason to skip a folder, never a reason to lose it.
                 notes.append(Finding(_named(entry, folder), (), LINKED))
-            elif entry.suffix == MARKDOWN and LOOKS_LIKE.get(kind, _anything)(entry):
+            elif entry.suffix == MARKDOWN and _carries_a_header(entry):
                 found.append(READERS[kind](entry))
             else:
                 notes.append(Finding(_named(entry, folder), (), UNDECLARED))
@@ -336,24 +336,29 @@ READERS: dict[Kind, Callable[[Path], Asset]] = {
 """How a file inside a named folder is read, by the part of the composition that named it."""
 
 
-def _anything(file: Path) -> bool:
-    """Every file of the right format is one of these, there being nothing else to go by.
+OPENS_A_HEADER = b"---"
+"""What a file in a named folder opens with to be read as an entity of that folder.
 
-    A command of the source environment is Markdown with an optional header, so a file in a
-    folder of commands that carries none is a command all the same, and demanding one would
-    refuse to carry the plainest kind of command there is.
-    """
-    return True
+Never the name of the file, which says nothing: a folder of subagents or of commands is free
+to hold a `README.md`, a diagram or a licence beside its entities, and each of those is a
+path nobody declared rather than an entity this run could not read.
+
+A subagent of the source environment is its header, and a header is the only thing that
+tells one from a file somebody put next to it. A command may be written without one and
+still be a command -- but a file with no header is then indistinguishable from any other
+Markdown in the folder, and calling it a command would put it in the report as the one
+thing this reading can be sure it is not. So it earns the row of a path nobody declared,
+which loses nothing: it is carried by the same rule and named in the same report, under the
+one description of it that is true.
+"""
 
 
 def _carries_a_header(file: Path) -> bool:
     """Whether ``file`` opens with the line a frontmatter opens with.
 
-    The one thing that tells a subagent from a file somebody put beside their subagents: a
-    subagent is its header, and a `README.md` explaining the folder is not one that fails to
-    parse. Asked before the file is read as an entity, so that the answer for it is the row
-    every other undeclared path in a named folder gets (FR-3a) rather than a refusal that
-    would cost the run every subagent in the folder.
+    Asked before the file is read as an entity, so that the answer for a file that is none
+    is the row every other undeclared path in a named folder gets (FR-3a) rather than a
+    refusal that would cost the run every entity in the folder beside it.
 
     Read as bytes and only the first of them: what opens the file is a question about its
     first three bytes, and a file that is not text at all has to be able to answer it too.
@@ -363,16 +368,6 @@ def _carries_a_header(file: Path) -> bool:
             return opened.read(len(OPENS_A_HEADER)) == OPENS_A_HEADER
     except OSError as error:
         raise ReadError(f"{file}: could not be read ({error})") from error
-
-
-OPENS_A_HEADER = b"---"
-LOOKS_LIKE: dict[Kind, Callable[[Path], bool]] = {Kind.SUBAGENT: _carries_a_header}
-"""What a file in a named folder has to look like to be read as an entity of that folder.
-
-By the kind the option named, like everything else here, and never by the name of the file:
-a folder of subagents is free to hold a `README.md`, a diagram or a licence beside them, and
-each of those is a path nobody declared rather than an entity this run could not read.
-"""
 
 
 def _dropped(root: Path, rules: Rules) -> list[Finding]:
