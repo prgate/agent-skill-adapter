@@ -1980,6 +1980,37 @@ def test_a_value_that_is_not_text_is_refused_with_the_file_and_the_field_named(
     assert "`model`" in result.report["error"]
 
 
+def test_a_counterpart_the_targets_own_set_does_not_carry_is_a_row_and_not_a_rewrite(
+    tmp_path: Path,
+) -> None:
+    """The rules do not outrank the description: a pair the target refuses is not applied.
+
+    The two files are versioned apart and either may be the stale one, so a counterpart the
+    target's own set does not contain is a disagreement this run cannot settle -- and writing
+    the value anyway would let a rules file quietly overrule the documentation it was written
+    against, which is the one thing Decisions 1 exists to prevent.
+    """
+    root = value_tree(tmp_path, values=["inherit", "flash"])
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "model: sonnet\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+    row = next(
+        entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if "sonnet" in entry["found_as"]
+    )
+
+    assert result.report["translations"] == []
+    assert (row["outcome"], row["verdict"]) == ("unknown", "lossy")
+    assert row["note"] == convert_module.REFUSED_BY_THE_TARGET
+
+
 def test_a_tool_name_without_a_documented_pair_stays_as_it_is_and_is_named(
     tmp_path: Path,
 ) -> None:
