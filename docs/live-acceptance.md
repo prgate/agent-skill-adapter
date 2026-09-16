@@ -137,6 +137,12 @@ That is the `description` of `.agents/agents/prg-fix.md` word for word, so the e
 read the carried file. **This contradicts the earlier conclusion of this project that no
 user subagent is ever named by this version.**
 
+A model can read a directory, so a list of names could in principle be a retelling of
+`ls .agents/agents/` rather than an answer from the environment. What rules that out here is
+that `self` and `research` stand beside the four carried names: they are the environment's
+built-ins and no file for them exists in the carried folder. The answer therefore comes from
+the registry the environment assembled while loading, not from the contents of a directory.
+
 The second workspace, run the same way, once named only `self` and `research`. One field
 explained it. Its subagent had been carried with
 
@@ -159,8 +165,14 @@ workspace answers:
 
 > self, research, note-keeper
 
-`agy agents` prints nothing and exits 0 in both workspaces, whatever is on disk. It is not a
-usable probe on this version.
+The `agy agent` and `agy agents` subcommands print nothing and exit 0 in every workspace,
+whatever is on disk — confirmed twice, independently. Neither is a usable probe on this
+version; the question has to go through a session.
+
+**Where this was measured.** All of it is the project level: `.agents/agents/` inside a
+throwaway workspace, which is where `--scope project` puts a subagent. The user level
+(`~/.gemini/config/agents/`) was written to by nobody over this whole effort, and nothing
+above says anything about it. That is a limit of the check, not a property of the transfer.
 
 ### Commands — absent, and the report says so
 
