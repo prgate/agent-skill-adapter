@@ -1,12 +1,17 @@
-"""Converting one skill folder: read what it holds, judge it, report, and say so in a code.
+"""Converting one asset set: read what it holds, judge it, report, and say so in a code.
 
-Three steps, one function. The folder is read into *findings* -- a frontmatter key, a
-bundled directory, a declared hook event -- each of which names one or more entry ids of
-the environment descriptions. :func:`envspec.gaps.compare` has already judged every entry
-of the source environment against the target, so nothing here compares anything: it looks
-up what the comparison concluded and applies the assembly table of PRD 5.2.
+Three steps, one function. :mod:`assets` reads the set into entities and each entity into
+*findings* -- a frontmatter key, a bundled directory, a declared hook event, a path the
+rules keep out -- each of which names the entry ids of the environment descriptions it
+turns on. :func:`envspec.gaps.compare` has already judged every entry of the source
+environment against the target, so nothing here compares anything: it looks up what the
+comparison concluded and applies the assembly table of PRD 5.2.
 
-Nothing is written without ``out``. With it, the skill is assembled under that folder at
+One report over the whole set and one verdict, the worst of them: a run that answered per
+entity would leave the caller adding up exit codes themselves. The rows are grouped by the
+entity they were found in, so that a set of hundreds of files is still read by a person.
+
+Nothing is written without ``out``. With it, each skill is assembled under that folder at
 the paths the target description names -- every one of them read from its ``layout``, so
 that what this command believes about the target environment is only ever what the
 description says, and is re-checked when the description is.
@@ -14,27 +19,45 @@ description says, and is re-checked when the description is.
 
 from __future__ import annotations
 
-import codecs
 import json
 import os.path
 import re
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
 from enum import Enum
-from math import isfinite
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from agent_skill_adapter.assets import (
+    BLOCK,
+    DROPPED,
+    EMPTY,
+    EVENT,
+    HOOKS_KEY,
+    LINKED,
+    SKILL_DIR,
+    SKILL_MD,
+    SKILL_TOP,
+    Asset,
+    Finding,
+    Inputs,
+    Kind,
+    ReadError,
+    read,
+)
+from agent_skill_adapter.assets import UNDECLARED as UNDECLARED_PATH
 from agent_skill_adapter.envspec.gaps import Gap, Origin, Outcome, compare
 from agent_skill_adapter.envspec.loader import base_specs, select
 from agent_skill_adapter.envspec.model import EnvSpec, Support
+from agent_skill_adapter.rules import Rules
 
-REPORT_SCHEMA = 1
-"""Version of the report format below. A field that changes meaning changes this number."""
+REPORT_SCHEMA = 2
+"""Version of the report format below. A field that changes meaning changes this number.
+
+2: the report is of a set. The rows a run computes are grouped under the entity they were
+found in (``assets``), where version 1 carried one ``skill`` and one flat ``properties``.
+"""
 
 REFERENCE = "vendor/environment@version, such as anthropic/claude-code@2.1.0"
 
@@ -57,7 +80,7 @@ SEVERITY = (Verdict.CLEAN, Verdict.LOSSY, Verdict.UNDECIDABLE)
 
 EXIT_CODE = {Verdict.CLEAN: 0, Verdict.LOSSY: 1, Verdict.UNDECIDABLE: 3}
 UNREADABLE = 6
-"""The skill folder could not be read at all, so there was nothing to judge."""
+"""The set could not be read at all, so there was nothing to judge."""
 
 UNWRITABLE = 7
 """The result could not be written under ``out``, and no file of it was left there.
@@ -102,22 +125,6 @@ verdict the assembly table computed exactly as it is. Reading this backwards out
 a property of that table nobody promised.
 """
 
-UNHOLDABLE = "JSON has no way to hold it, and no text it is always written as"
-NO_TEXT_FOR = {
-    "float": "JSON has no `nan` and no infinity: `json.dumps` spells them `NaN` and "
-    "`Infinity`, which is Python's own extension to the format and not a number a strict "
-    "reader will accept",
-    "set": "a set has no order, so the same header would put different bytes in the "
-    "assembled file on the next run",
-    "bytes": "bytes have no spelling of their own, and the nearest thing to one is a Python "
-    "repr handed to whatever reads the file next",
-}
-"""Why a shape YAML carries and JSON does not is refused -- one reason each, the one that fired.
-
-Printing all of them would have a person holding a `!!binary` read about the order of sets.
-The module answers this way throughout: the anchor names its line, the size limit its number.
-"""
-
 UNDECLARED = "no entry with this id in either description"
 """Why a property carries no words from either side: nobody documented it under that id."""
 
@@ -133,6 +140,26 @@ only the *target*'s capabilities or layout carry never earns a `Gap` at all, and
 target has a documented place or word for the entry. That word need not be a clean one --
 a target-only capability the target documents as unsupported is still `MISSING`, exactly as
 a `Gap` would call it."""
+
+ASKS_NOTHING = {
+    DROPPED: Outcome.OUT_OF_SCOPE,
+    EMPTY: Outcome.OUT_OF_SCOPE,
+    UNDECLARED_PATH: Outcome.UNKNOWN,
+    LINKED: Outcome.UNKNOWN,
+}
+"""What a path that asks no entry amounts to, keyed by the reason the reading gives for it.
+
+A path the rules keep out and a named part of the set that is empty cost the transfer
+nothing: both are the set being smaller than it looks, said out loud so that no path is
+dropped in silence (FR-29.1, FR-25.2). A path nobody declared and a folder the walk did not
+follow are `unknown` from an `extension` -- the report row the specification asks for by
+name (story 5), because what happens to them is decided by a rule of ours and not by
+anything either environment documents.
+
+Keyed by the reason and not by the shape of the finding: a finding with no id and a reason
+not in this table is not about a path at all but about a value the header had to rewrite to
+cross, and that is a line of advice rather than a row.
+"""
 
 _HOW_TO_KEEP_A_HOOK = (
     "Move the rule into the body of the skill: prose the model may disregard is weaker "
@@ -154,14 +181,6 @@ WORKAROUNDS: dict[str, tuple[str, ...]] = {
     "hook-decision": _HOW_TO_KEEP_A_HOOK,
 }
 
-BLOCK = "hook.decision.block"
-"""Firing an event and stopping what it precedes are two entries, so a hook asks about both.
-
-A target that documents the event says nothing by that about whether a hook of it can
-refuse the tool call, so the two are graded apart. Why the descriptions carry the pair
-split rather than the converter treating hooks specially is ADR-0007.
-"""
-
 
 class Scope(str, Enum):
     """Which level of the target environment the skill is assembled for.
@@ -177,11 +196,6 @@ class Scope(str, Enum):
 SKILLS_ROOT = {Scope.PROJECT: "skills.project", Scope.USER: "skills.user"}
 HOOKS_FILE = {Scope.PROJECT: "hooks.project", Scope.USER: "hooks.user"}
 SKILL_FILE = "skill.file"
-DIRECTORY = "skill.dir."
-TOP = "skill.top."
-"""Ids of what the skill folder holds. `skill.file.*` is taken: those are the skill file's
-own fields, and a file called `README.md` is not one of them."""
-EVENT = "hook.event."
 """Entry ids the assembly asks the target description for. Ids, and never paths.
 
 Every path this command writes to is read from the ``layout`` of the target description
@@ -194,67 +208,6 @@ WORKSPACE_ROOT = "<workspace-root>"
 HOME = "~"
 """What a layout path may carry in place of a name or a root, expanded by the assembly."""
 
-SKILL_MD = "SKILL.md"
-HOOKS_KEY = "hooks"
-"""The file and the frontmatter key of the source environment this command opens by name."""
-
-SKILL_FILE_BYTES = 1024 * 1024
-"""How much of a skill file this command reads before refusing to read any of it.
-
-Not the size limit of an environment, which is the other limit a skill file has: that one
-is a documented property of the target (FR-32 keeps it in the `limits` of a description),
-a file past it is split rather than refused (FR-33), and exceeding it is its own outcome
-with its own exit code 9 (NFR-2). This one is a guard on reading a stranger's repository,
-so overrunning it is code 6 -- nothing was read, so there is nothing to judge. It guards
-the reading and not the parsing: a file is measured before it is opened, or the folder
-decides how many bytes this command pulls into memory before any limit is consulted.
-
-# ponytail: one number for any skill file, whatever the target environment allows. The way
-# up is to read the target's own limit out of the `limits` of its description (FR-32) and
-# split what exceeds it (FR-33), after which this number goes back to guarding only how
-# much of a stranger's file is pulled into memory.
-"""
-
-FRONTMATTER_BYTES = 64 * 1024
-FRONTMATTER_DEPTH = 16
-"""What a header may weigh and how deep it may nest before the file is refused (FR-15).
-
-Both are far above anything a person writes and far below what would cost this command its
-memory or its stack.
-"""
-
-FRONTMATTER_CLOSE = re.compile(r"\r?\n---[ \t]*(?:\r?\n|\Z)")
-"""The line that closes a header: exactly ``---``, not merely a line starting with it.
-
-A YAML key is free to start with three dashes -- ``---note: below`` is as valid a mapping
-entry as any other -- so a scan for the text ``---`` at the start of a line would close the
-header there and read everything past it as body, unnoticed by the person and the
-frontmatter parser both. Every conventional frontmatter reader closes only at a line with
-nothing else on it, which is what this pattern asks for.
-
-CRLF line endings close a header exactly as LF ones do: a skill file written on Windows is
-a skill file, and the bytes are copied as they were found either way.
-"""
-
-# ponytail: named here because the format of the descriptions has no field for "this entry
-# is required" -- the word lives in the prose of a `note`. The way up is a flag on
-# `Capability`, after which this list is read off the descriptions rather than written here.
-REQUIRED_FIELDS = ("description",)
-"""The frontmatter keys a skill file must carry, taken from what the descriptions do mark.
-
-Where the descriptions disagree, the environment that loads the file decides, because its
-word is the refusal a person actually meets. The open specification decides where an entry
-came from -- whether the target was obliged to document it -- and not what a runtime accepts.
-
-`description` is here: the target description marks it required, the open specification
-marks it required, and the source environment lets it fall back to the first non-empty line
-of the body -- filling it in from there would be a translation rule (FR-6) this command does
-not have. `name` is not, and the two sides do disagree about it: the open specification
-marks it required and has it match the parent directory name, while both environments say it
-defaults to the directory name when omitted. Both runtimes load such a file, so demanding it
-here would refuse a skill file that works in either one.
-"""
-
 
 class ConvertError(Exception):
     """A refusal that still produces a report: the message says what is wrong and where."""
@@ -265,18 +218,16 @@ class ConvertError(Exception):
 
 
 @dataclass(frozen=True)
-class Finding:
-    """One thing found in the skill folder, and the entry ids it asks the descriptions about."""
-
-    found_as: str
-    ids: tuple[str, ...]
-
-
-@dataclass(frozen=True)
 class Property:
-    """One entry id the skill folder depends on, and what the two descriptions make of it."""
+    """One row of the report: what was found, and what the two descriptions make of it.
 
-    id: str
+    ``id`` is the entry id of the descriptions the finding asked about, and ``None`` where
+    it asked about none: a path the rules keep out, a folder nobody declared, a part of the
+    set that is empty. Those have no entry to look up and still have a row, which is the
+    whole of FR-3 -- a file that left no row would be a file nobody can account for.
+    """
+
+    id: str | None
     found_as: str
     outcome: Outcome
     origin: Origin
@@ -284,6 +235,23 @@ class Property:
     source_says: str | None
     target_says: str | None
     note: str | None = None
+
+
+@dataclass(frozen=True)
+class Assessed:
+    """One entity of the set, judged: its rows and the verdict they add up to.
+
+    ``name`` is what the entity is called -- for a skill, the name its own header or folder
+    gives it -- and is empty for a record of a named part rather than of an entity in it.
+    ``assembled_name`` is that name suffixed with the target environment, and ``None`` for
+    everything this run assembles nothing for.
+    """
+
+    asset: Asset
+    name: str
+    assembled_name: str | None
+    verdict: Verdict
+    properties: tuple[Property, ...]
 
 
 @dataclass(frozen=True)
@@ -321,310 +289,6 @@ def worst(verdicts: Iterable[Verdict]) -> Verdict:
     transfer, and there is nothing about it left to decide.
     """
     return max(verdicts, key=SEVERITY.index, default=Verdict.CLEAN)
-
-
-class _Anchored(Exception):
-    """The header declares a YAML anchor, at the line this carries.
-
-    Its own exception rather than a ``yaml`` one: the header parses, and calling a refusal
-    by rule a syntax error would send a person looking for a typo that is not there.
-    """
-
-    def __init__(self, line: int) -> None:
-        super().__init__(f"line {line}")
-        self.line = line
-
-
-class _StrictLoader(yaml.SafeLoader):
-    """A loader that refuses what a skill header may not contain: a repeated key, an anchor.
-
-    PyYAML keeps the last of two equal keys and says nothing, which is how a frontmatter
-    that sets ``model`` twice reaches a converter as one value nobody chose. An anchor and
-    the alias repeating it are the same defect spelled differently: the text a person reads
-    in the file and the value the parser builds stop being the same thing, and a converter
-    that copied the file over would hand the target environment neither of them (FR-15).
-    """
-
-    def compose_node(self, parent: yaml.Node | None, index: int) -> yaml.Node | None:
-        node = super().compose_node(parent, index)
-        # An alias can only repeat an anchor declared before it, so refusing every anchor as
-        # it is registered refuses both -- and refuses them at the place the anchor is written,
-        # which is the place a person has to edit.
-        if self.anchors:
-            raise _Anchored(0 if node is None else node.start_mark.line + 1)
-        return node
-
-    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
-        # The parser goes first. A key YAML allows and a mapping cannot hold -- `? [a, b]`
-        # builds a list -- is refused there, as the `ConstructorError` every other structural
-        # break arrives as; asked about before that, it is a key that cannot go into a set,
-        # and the answer to the caller would be a traceback rather than a report.
-        mapping = super().construct_mapping(node, deep=deep)
-        seen: set[Any] = set()
-        for key_node, _ in node.value:
-            key = self.construct_object(key_node, deep=deep)
-            if key in seen:
-                raise yaml.constructor.ConstructorError(
-                    "while reading the frontmatter",
-                    node.start_mark,
-                    f"key {key!r} is declared twice",
-                    key_node.start_mark,
-                )
-            seen.add(key)
-        return mapping
-
-
-def _depth(value: Any) -> int:
-    """How deeply the loaded frontmatter nests, walked with a stack rather than by recursion.
-
-    The depth is a limit on a file somebody else wrote, and a limit that overflows the
-    interpreter's stack on the very input it guards against is not a limit.
-    """
-    deepest = 0
-    pending: list[tuple[Any, int]] = [(value, 1)]
-    while pending:
-        item, level = pending.pop()
-        deepest = max(deepest, level)
-        if isinstance(item, Mapping):
-            pending += [(nested, level + 1) for nested in item.values()]
-        elif isinstance(item, list):
-            pending += [(nested, level + 1) for nested in item]
-    return deepest
-
-
-def _as_spelled(key: Any) -> str:
-    """The key as the header writes it, asked of `yaml` rather than printed as a Python value.
-
-    A `repr` would name the type -- `datetime.date(2026, 9, 14)` -- which is a string the
-    file does not contain, and this module names a value by what it reads as and never by
-    its type. Dumped back into YAML, a key comes out the way it is written there: bare where
-    the format reads it as a date or a number, quoted where it is text. That quoting is the
-    whole of the difference between two keys that collapse into one, so it is the difference
-    a person is shown.
-    """
-    return yaml.safe_dump(key, default_flow_style=True).removesuffix("...\n").strip()
-
-
-def _as_written(key: Any) -> str:
-    """The text a key ends up as in what this run writes, asked of `json` and not guessed.
-
-    Two keys that differ here are two keys in the result; two that agree are one key in it,
-    whatever they were in the file. Asking by dumping and reading back rather than by a
-    table of pairs, because the rules for spelling a key belong to the format and not to us:
-    a date and the quoted text of it collapse here, and so do `1` and `"1"`, `true` and
-    `"true"`, `null` and `"null"` -- and so will whatever else the format decides to spell
-    the same way, without a line added here. A key that is unwritable never reaches this:
-    `_portable` refuses it above, which is what leaves only keys `json` can hold.
-    """
-    return str(next(iter(json.loads(json.dumps({key: 0})))))
-
-
-def _portable(value: Any, where: str, path: Path, rewritten: list[str]) -> Any:
-    """``value`` as something JSON holds, and a line for every value that had to change.
-
-    YAML carries shapes JSON does not, and they fall in two halves. A date and a timestamp
-    have one text they are always written as -- the one ISO 8601 spells -- so they cross as
-    that text, and the line this appends is how a reader learns that they did. A set has no
-    order and bytes have no spelling: there is no text they read back as, and the nearest
-    thing to one comes out differently on every run, which would put different bytes in the
-    assembled file on the same skill. Those are refused, where every other header this
-    command cannot carry across is refused.
-
-    Keys go through this too, and not because they might be dates: JSON has no key but a
-    string, and `json.dumps` refuses a date one whatever is done about its values.
-    """
-    if isinstance(value, Mapping):
-        # Gathered key by key into a mapping of its own rather than built as a comprehension:
-        # two keys that differ in the file can end up as one in what this run writes, and a
-        # comprehension would keep the last of them without a word. That silence is what
-        # `_StrictLoader` refuses a key declared twice for, and this is the same duplicate,
-        # made by carrying the header across rather than by the person who wrote it. Which
-        # keys those are is `_as_written`, asked of the format rather than listed here: where
-        # the collapse happens on the way is our business and not the reader's -- the value
-        # is gone either way.
-        carried: dict[Any, Any] = {}
-        spelled: dict[str, Any] = {}
-        for key, item in value.items():
-            inside = f"{where}.{key}"
-            name = _portable(key, inside, path, rewritten)
-            written = _as_written(name)
-            if written in spelled:
-                raise ConvertError(
-                    f"{path}: `{where}` declares {_as_spelled(spelled[written])} and "
-                    f"{_as_spelled(key)}, which are two keys in the file and the one key "
-                    f"`{written}` in what this run writes; the value of the first would be "
-                    "dropped here without a word. Rename one of them, or remove it -- "
-                    "quoting will not part them, because both cross as that same text",
-                    UNREADABLE,
-                )
-            spelled[written] = key
-            carried[name] = _portable(item, inside, path, rewritten)
-        return carried
-    if isinstance(value, list):
-        return [
-            _portable(item, f"{where}[{index}]", path, rewritten)
-            for index, item in enumerate(value)
-        ]
-    # `datetime` is a `date`, and both answer `isoformat`. A `bool` is an `int` and neither
-    # is touched: JSON holds them as they are, and `true` is what `true` was written as.
-    if isinstance(value, date):
-        text = value.isoformat()
-        rewritten.append(
-            f"`{where}` was written as a {type(value).__name__} and is carried as the text "
-            f"`{text}`: YAML has a date and JSON has none, so that text is what any file "
-            "this run writes puts there, and what the target environment will read"
-        )
-        return text
-    if value is None or isinstance(value, (str, int)):
-        return value
-    # A float JSON holds is a finite one. `nan` and the two infinities leave `json.dumps` as
-    # a bare `NaN` or `Infinity` -- Python's own extension to the format, which a strict
-    # reader refuses -- so the file would leave here looking assembled and arrive unreadable.
-    # They belong with the set and the bytes below, and they get past a check written against
-    # exactly them only because asking the type is not asking whether the value can be
-    # written down.
-    if isinstance(value, float) and isfinite(value):
-        return value
-    # Named by what it reads as, not by its type, where the two differ: every number JSON
-    # holds is a float too, so "reads as a float" would send a person to the wrong line.
-    form = repr(value) if isinstance(value, float) else type(value).__name__
-    raise ConvertError(
-        f"{path}: `{where}` reads as `{form}`, and "
-        + NO_TEXT_FOR.get(type(value).__name__, UNHOLDABLE)
-        + "; quote the value to move it across as text",
-        UNREADABLE,
-    )
-
-
-def _frontmatter(path: Path) -> tuple[dict[str, Any], list[str]]:
-    """The frontmatter of ``path`` as JSON holds it, the lines its rewrites owe the report,
-    or a refusal naming what is wrong and where.
-
-    Every refusal here is structural: the file is not the shape a skill file has, so no
-    part of it can be trusted to mean what it appears to mean.
-    """
-    if not path.is_file():
-        raise ConvertError(f"{path}: no SKILL.md here, so this is not a skill folder", UNREADABLE)
-    size = path.stat().st_size
-    if size > SKILL_FILE_BYTES:
-        raise ConvertError(
-            f"{path}: the file is {size} bytes, past the {SKILL_FILE_BYTES} this command "
-            "will read; a skill file that size is not one, and reading it to find out would "
-            "be letting the folder decide how much memory the run takes",
-            UNREADABLE,
-        )
-    raw = path.read_bytes()
-    if raw.startswith(codecs.BOM_UTF8):
-        raise ConvertError(
-            f"{path}: the file opens with a UTF-8 byte order mark, so the `---` that opens "
-            "the frontmatter is not the first byte; save the file without a BOM",
-            UNREADABLE,
-        )
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as error:
-        raise ConvertError(f"{path}: not UTF-8 text ({error})", UNREADABLE) from error
-    if not text.startswith("---"):
-        raise ConvertError(
-            f"{path}: no frontmatter; a skill file opens with a `---` line", UNREADABLE
-        )
-    closing = FRONTMATTER_CLOSE.search(text, 3)
-    if closing is None:
-        raise ConvertError(
-            f"{path}: the frontmatter opened on line 1 is never closed by a `---` line",
-            UNREADABLE,
-        )
-    header = text[3 : closing.start()]
-    if len(header.encode("utf-8")) > FRONTMATTER_BYTES:
-        raise ConvertError(
-            f"{path}: the frontmatter is longer than {FRONTMATTER_BYTES} bytes, which is "
-            "not a header any more; what belongs in the body of the skill goes below the "
-            "closing `---` line",
-            UNREADABLE,
-        )
-    try:
-        # A header nested past what the parser itself can carry arrives as a `RecursionError`,
-        # which is the depth limit being hit before this function gets to apply its own.
-        loaded = yaml.load(header, _StrictLoader)
-    except _Anchored as error:
-        raise ConvertError(
-            f"{path}: the frontmatter declares a YAML anchor on line {error.line}. Anchors "
-            "and the aliases repeating them are valid YAML and are refused here all the "
-            "same (FR-15): the text a person reads in the file and the value the parser "
-            "builds stop being the same thing, and this command cannot carry both across",
-            UNREADABLE,
-        ) from error
-    except (yaml.YAMLError, RecursionError) as error:
-        raise ConvertError(
-            f"{path}: the frontmatter is not valid YAML ({error})", UNREADABLE
-        ) from error
-    if not isinstance(loaded, dict):
-        raise ConvertError(
-            f"{path}: the frontmatter is not a mapping of keys "
-            f"(it reads as {type(loaded).__name__})",
-            UNREADABLE,
-        )
-    if _depth(loaded) > FRONTMATTER_DEPTH:
-        raise ConvertError(
-            f"{path}: the frontmatter nests deeper than {FRONTMATTER_DEPTH} levels; a skill "
-            "header that deep is a data file, and reading one is not what this command does",
-            UNREADABLE,
-        )
-    missing = [key for key in REQUIRED_FIELDS if key not in loaded]
-    if missing:
-        raise ConvertError(
-            f"{path}: the frontmatter declares no "
-            + " and no ".join(f"`{key}`" for key in missing)
-            + "; the description of the target environment marks the field required, so "
-            "there is nothing here that could be assembled for it, and a value invented "
-            "for the field would be this command writing the skill rather than moving it",
-            UNREADABLE,
-        )
-    rewritten: list[str] = []
-    carried: dict[str, Any] = _portable(loaded, "frontmatter", path, rewritten)
-    return carried, rewritten
-
-
-def _findings(skill_dir: Path) -> tuple[list[Finding], dict[str, Any], list[str]]:
-    """Everything the folder holds that an environment has to reproduce, in the order found.
-
-    Ids are built from the names as written -- ``skill.frontmatter.<key>``,
-    ``skill.dir.<name>``, ``skill.top.<name>``, ``hook.event.<name>`` -- and no table of
-    known names is kept.
-    A name no description declares then reaches the report as a property nobody documented,
-    which is the point: it must not vanish because we had not heard of it.
-    """
-    if not skill_dir.is_dir():
-        raise ConvertError(f"{skill_dir}: no such folder", UNREADABLE)
-    front, rewritten = _frontmatter(skill_dir / SKILL_MD)
-    findings = [Finding(f"frontmatter key `{key}`", (f"skill.frontmatter.{key}",)) for key in front]
-    held = sorted(skill_dir.iterdir())
-    findings += [
-        Finding(f"bundled directory `{entry.name}/`", (f"{DIRECTORY}{entry.name}",))
-        for entry in held
-        if entry.is_dir()
-    ]
-    # Everything else at the top of the folder, the skill file aside: a README, a licence, a
-    # diagram. Nothing says where they go in the target environment, and a file that fell out
-    # of the report would be content lost under an exit code that called the transfer clean.
-    findings += [
-        Finding(f"top-level file `{entry.name}`", (f"{TOP}{entry.name}",))
-        for entry in held
-        if not entry.is_dir() and entry.name != SKILL_MD
-    ]
-    # ponytail: hooks are read from the frontmatter alone, which is where a skill declares
-    # its own. Workspace-level hook files belong to the workspace, not to one skill folder,
-    # and this command takes one skill folder (R07); reading them arrives with the workspace.
-    declared = front.get(HOOKS_KEY)
-    events = declared if isinstance(declared, Mapping) else {}
-    findings += [
-        Finding(
-            f"hook event `{event}` declared in frontmatter key `hooks`",
-            (f"hook.event.{event}", BLOCK),
-        )
-        for event in events
-    ]
-    return findings, front, rewritten
 
 
 def _kind(entry_id: str, gap: Gap | None) -> str:
@@ -678,7 +342,10 @@ def _target_alone(target: EnvSpec, entry_id: str) -> tuple[str | None, Outcome] 
 
 
 def _judge(
-    findings: Sequence[Finding], gaps: Mapping[str, Gap], target: EnvSpec
+    findings: Sequence[Finding],
+    gaps: Mapping[str, Gap],
+    target: EnvSpec,
+    translation: Rules,
 ) -> tuple[list[Property], list[str]]:
     """Every finding against the comparison, once per entry id, plus the advice it earns.
 
@@ -691,11 +358,25 @@ def _judge(
     One id, one row, however many findings asked about it: ``hook.decision.block`` is asked
     once by every declared hook, and the row names all of them. Naming the first and dropping
     the rest would read as though only that hook lost its veto.
+
+    A finding that asks no id at all is a row too, ahead of the rest: it is about a path, and
+    a path that produced no row is a file this run cannot account for. The one exception is a
+    value the header had to rewrite to cross, which is about no path and leaves a line of
+    advice -- first of those, because it happened first, while the header was being read.
     """
     asked_by: dict[str, list[str]] = {}
+    asked_nothing: list[Property] = []
+    rewritten: list[str] = []
     for finding in findings:
         for entry_id in finding.ids:
             asked_by.setdefault(entry_id, []).append(finding.found_as)
+        if finding.ids:
+            continue
+        row = _asked_nothing(finding, translation)
+        if row is None:
+            rewritten.append(finding.note or finding.found_as)
+        else:
+            asked_nothing.append(row)
     properties: list[Property] = []
     advice: list[str] = []
     for entry_id, found_as in asked_by.items():
@@ -727,7 +408,31 @@ def _judge(
         if verdict is not Verdict.CLEAN:
             ways_out = WORKAROUNDS.get(_kind(entry_id, gap), ())
             advice += [line for line in ways_out if line not in advice]
-    return properties, advice
+    return [*asked_nothing, *properties], [*rewritten, *advice]
+
+
+def _asked_nothing(finding: Finding, translation: Rules) -> Property | None:
+    """The row a finding that names no entry id earns, or ``None`` when it is not about a path.
+
+    The reason the reading gave decides the outcome (:data:`ASKS_NOTHING`) and a path nobody
+    declared carries the one rule the translation states for such a file, in its own words:
+    FR-30 asks for one rule and one row per undeclared file, and two wordings of it -- the
+    reading's and the rules' -- would be two rules as soon as either changed.
+    """
+    outcome = ASKS_NOTHING.get(finding.note or "")
+    if outcome is None:
+        return None
+    note = translation.undocumented.note if finding.note == UNDECLARED_PATH else finding.note
+    return Property(
+        id=None,
+        found_as=finding.found_as,
+        outcome=outcome,
+        origin=Origin.EXTENSION,
+        verdict=verdict_of(outcome, Origin.EXTENSION),
+        source_says=None,
+        target_says=None,
+        note=note,
+    )
 
 
 def _layout(spec: EnvSpec, entry_id: str) -> str | None:
@@ -959,14 +664,17 @@ def _wanted(properties: Sequence[Property]) -> list[tuple[str, str]]:
     well, and a `README.md` nobody has a place for would go unmentioned while a directory in
     the same position is named.
     """
+    held = [entry.id for entry in properties if entry.id is not None]
     wanted = [(SKILL_FILE, SKILL_MD)]
     wanted += [
-        (entry.id, f"{entry.id[len(DIRECTORY) :]}/")
-        for entry in properties
-        if entry.id.startswith(DIRECTORY)
+        (entry_id, f"{entry_id[len(SKILL_DIR) :]}/")
+        for entry_id in held
+        if entry_id.startswith(SKILL_DIR)
     ]
     return wanted + [
-        (entry.id, entry.id[len(TOP) :]) for entry in properties if entry.id.startswith(TOP)
+        (entry_id, entry_id[len(SKILL_TOP) :])
+        for entry_id in held
+        if entry_id.startswith(SKILL_TOP)
     ]
 
 
@@ -1108,7 +816,7 @@ def _links_within(copied_from: Path, label: str) -> list[str]:
     if copied_from.is_symlink():
         if label == SKILL_MD:
             # The one link this command does read through, and so the one whose wording must
-            # not say it was not read: `_frontmatter` graded the run on its content and the
+            # not say it was not read: `assets.frontmatter` graded the run on its content and the
             # copy staged that content, not the pointer. Named all the same, because the run
             # reached into a folder nobody named on the command line to do it.
             # `os.readlink`, not `resolve()`: it shows what the link itself says, and it does
@@ -1151,7 +859,7 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
 
     ``SKILL.md`` is the one exception, because it is not this function's own rule to keep:
     its bytes are what the whole run was graded on, read straight through a link already by
-    `_frontmatter`. Carrying it over as a link here -- almost always unresolvable, since it
+    `assets.frontmatter`. Carrying it over as a link here -- almost always unresolvable, since it
     would point relative to a folder under ``out`` rather than the one it came from -- would
     stage a broken pointer behind a verdict computed from real content. It is copied through
     the link instead, exactly as reading it already was. It is still named among the links
@@ -1258,7 +966,7 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
                 # at rather than the link itself, and would send a link to a directory into
                 # the branch below -- reading through the one thing that must not be read.
                 # `SKILL.md` itself is excepted: its bytes are what the whole run was graded
-                # on, read straight through a link by `_frontmatter` already, so carrying it
+                # on, read straight through a link by `assets.frontmatter` already, so carrying it
                 # as a link here -- almost never resolvable relative to a different folder
                 # under ``out`` -- would stage a broken pointer behind a verdict computed
                 # from real content. It falls through to the plain copy below, which follows
@@ -1351,26 +1059,24 @@ def _gaps(
 
 
 def _report(
-    skill_dir: Path,
     source: str | None,
     target: str | None,
     verdict: Verdict,
     exit_code: int,
-    properties: Sequence[Property],
+    assessed: Sequence[Assessed],
     advice: Sequence[str],
     written: Sequence[dict[str, str]],
     error: str | None,
-    *,
-    name: str,
-    assembled_name: str | None,
 ) -> dict[str, Any]:
     """The machine-readable report. ``report_schema`` first, and ``error`` says why it is thin.
 
-    ``name`` is the skill's own name -- the frontmatter's or the folder's -- and
-    ``assembled_name`` is that name suffixed with the target environment, the one every
-    destination in ``written`` is built from; ``None`` when the run was refused before the
-    target was even known. Carried apart and not merged into one field, because the second
-    is a property of *this* conversion and the first is not.
+    One report for the whole set, and the rows grouped under the entity they were found in:
+    a set of hundreds of files makes hundreds of rows, and a flat list of them is a thing a
+    person scrolls rather than reads (FR-26.1). ``name`` is the entity's own name -- for a
+    skill the frontmatter's or the folder's -- and ``assembled_name`` is that name suffixed
+    with the target environment, the one every destination in ``written`` is built from;
+    ``None`` for anything this run assembles nothing for. Carried apart and not merged into
+    one field, because the second is a property of *this* conversion and the first is not.
     """
     return {
         "report_schema": REPORT_SCHEMA,
@@ -1378,19 +1084,28 @@ def _report(
         "exit_code": exit_code,
         "source": _environment(source),
         "target": _environment(target),
-        "skill": {"path": str(skill_dir), "name": name, "assembled_name": assembled_name},
-        "properties": [
+        "assets": [
             {
-                "id": entry.id,
-                "found_as": entry.found_as,
-                "outcome": entry.outcome.value,
-                "origin": entry.origin.value,
+                "kind": entry.asset.kind.value,
+                "path": str(entry.asset.path),
+                "name": entry.name,
+                "assembled_name": entry.assembled_name,
                 "verdict": entry.verdict.value,
-                "source_says": entry.source_says,
-                "target_says": entry.target_says,
-                "note": entry.note,
+                "properties": [
+                    {
+                        "id": row.id,
+                        "found_as": row.found_as,
+                        "outcome": row.outcome.value,
+                        "origin": row.origin.value,
+                        "verdict": row.verdict.value,
+                        "source_says": row.source_says,
+                        "target_says": row.target_says,
+                        "note": row.note,
+                    }
+                    for row in entry.properties
+                ],
             }
-            for entry in properties
+            for entry in assessed
         ],
         # Empty without `out`. It is a field and not an omission because a reader has to be
         # able to tell "wrote nothing" from "this report is of an older shape".
@@ -1429,15 +1144,21 @@ def _summary(report: dict[str, Any]) -> str:
     price. U+2028 and U+2029, and the bidirectional overrides, are deliberately not covered:
     no terminal acts on them the way it acts on these.
     """
-    skill = report["skill"]["path"]
-    lines = [f"{skill}: {report['outcome']} (exit {report['exit_code']})"]
+    lines = [f"the set: {report['outcome']} (exit {report['exit_code']})"]
     if report["error"]:
         lines.append(f"  {report['error']}")
-    lines += [
-        f"  {entry['verdict']:<12} {entry['id']} -- {entry['found_as']} "
-        f"({entry['outcome']}, {entry['origin']})" + (f"; {entry['note']}" if entry["note"] else "")
-        for entry in report["properties"]
-    ]
+    for asset in report["assets"]:
+        # The entity first and its rows indented under it: the grouping the report carries is
+        # the grouping a person reads, or a set of hundreds of rows is a wall of them.
+        lines.append(
+            f"  {asset['verdict']:<12} {asset['kind']} `{asset['name']}` at {asset['path']}"
+        )
+        lines += [
+            f"    {entry['verdict']:<12} {entry['id'] or '-'} -- {entry['found_as']} "
+            f"({entry['outcome']}, {entry['origin']})"
+            + (f"; {entry['note']}" if entry["note"] else "")
+            for entry in asset["properties"]
+        ]
     lines += [
         f"  wrote {entry['path']} (it belongs at {entry['to']})" for entry in report["written"]
     ]
@@ -1460,8 +1181,49 @@ def refused(result: Conversion, exit_code: int, message: str) -> Conversion:
     return Conversion(result.verdict, exit_code, report, _summary(report))
 
 
+def _hooks_of(asset: Asset) -> Mapping[str, Any]:
+    """The hooks an entity declares in its header, or none: only a mapping is a set of them."""
+    declared = asset.frontmatter.get(HOOKS_KEY)
+    return declared if isinstance(declared, Mapping) else {}
+
+
+def _assess(
+    asset: Asset,
+    gaps: Mapping[str, Gap],
+    target: EnvSpec,
+    translation: Rules,
+    scope: Scope,
+) -> tuple[Assessed, list[str]]:
+    """One entity of the set: its rows, its own verdict, and the lines it owes the reader.
+
+    A skill is the one kind this command assembles, so it is the one kind asked where its
+    parts go: `_left_behind` is read off the layout of the target alone, before and whether
+    or not any bytes are asked for, because what the transfer costs is settled by the two
+    descriptions and never by `--out`.
+
+    An asset with no name is the named part itself rather than an entity of it -- an empty
+    folder, a path the rules keep out, a file nobody declared. It is judged like any other,
+    and assembled nowhere: there is no name to assemble it under.
+    """
+    properties, advice = _judge(asset.findings, gaps, target, translation)
+    verdict = worst(entry.verdict for entry in properties)
+    if asset.kind is not Kind.SKILL or not asset.name:
+        return Assessed(asset, asset.name, None, verdict, tuple(properties)), advice
+    name = _skill_name(asset.path, asset.frontmatter)
+    stayed = _left_behind(target, scope, properties, _hooks_of(asset))
+    # A part with nowhere to go did not cross, whatever its row says about being reproduced:
+    # exit code 0 on a run that left one behind would be this command telling a caller there
+    # is nothing here to look at.
+    if stayed:
+        verdict = worst([verdict, Verdict.LOSSY])
+    assembled = Assessed(
+        asset, name, _assembled_name(name, target.environment), verdict, tuple(properties)
+    )
+    return assembled, [*advice, *stayed]
+
+
 def convert(
-    skill_dir: str | Path,
+    inputs: Inputs,
     source: str | None,
     target: str | None,
     *,
@@ -1470,68 +1232,52 @@ def convert(
     scope: Scope = Scope.PROJECT,
     allow_stale: bool = False,
 ) -> Conversion:
-    """Read the skill folder, judge every property it holds, and report what a transfer costs.
+    """Read the set, judge every property of every entity in it, and report what it costs.
 
-    ``source`` and ``target`` name the two environments as ``vendor/environment@version``;
-    neither version is inferred, and a missing or unreadable one ends the run at
-    ``undecidable`` rather than at a guess. A folder that is not shaped like a skill ends it
-    at exit code 6. Both still produce a report: a run that refuses and says nothing
-    machine-readable about the refusal cannot be acted on by whatever called it.
+    ``inputs`` is the composition of the set -- folders of skills, of subagents, of commands,
+    the rule files, the manifest -- and any part of it may be absent. ``source`` and
+    ``target`` name the two environments as ``vendor/environment@version``; neither version
+    is inferred, and a missing or unreadable one ends the run at ``undecidable`` rather than
+    at a guess. A set that cannot be read ends it at exit code 6. Both still produce a
+    report: a run that refuses and says nothing machine-readable about the refusal cannot be
+    acted on by whatever called it.
 
-    Without ``out`` nothing is written and the report is the whole answer. With it, the skill
-    is assembled under ``out`` at the paths the target description names, at the level
-    ``scope`` chooses.
+    The verdict of the run is the worst of the whole set, exactly as the verdict of one
+    entity is the worst of its rows. Without ``out`` nothing is written and the report is the
+    whole answer. With it, every skill of the set is assembled under ``out`` at the paths the
+    target description names, at the level ``scope`` chooses.
     """
-    skill_dir = Path(skill_dir)
-    properties: list[Property] = []
+    assessed: list[Assessed] = []
     advice: list[str] = []
     written: list[dict[str, str]] = []
-    # A best-effort label for a report that refuses before the frontmatter is read at all --
-    # `_gaps` failing, or `_findings` finding no folder or no `SKILL.md` there. Overwritten
-    # below once the frontmatter has answered for the skill's own name; left alone otherwise,
-    # exactly as it stood before this rule read the frontmatter first.
-    name = Path(os.path.abspath(skill_dir)).name
-    assembled_name: str | None = None
     # Until the assembly table has judged something there is no verdict to keep, and
     # "we could not read enough to say" is what `undecidable` means. Once it has, that
     # verdict stands even if the run then fails to write: being unable to put the files
-    # somewhere is not a judgement about what the skill loses in the transfer.
+    # somewhere is not a judgement about what the set loses in the transfer.
     verdict = Verdict.UNDECIDABLE
     # Which side of the run an operating system error came from, and so which code answers
     # for it: while the descriptions are being read it is code 3, like every other way of not
-    # knowing what the two environments say; from there on it is the skill folder, code 6.
+    # knowing what the two environments say; from there on it is the set, code 6.
     # The writing side names its own code where it writes, so it never arrives here as one.
     side = EXIT_CODE[Verdict.UNDECIDABLE]
+    ground = ""
     try:
         gaps, target_spec = _gaps(root, source, target, allow_stale)
         side = UNREADABLE
-        findings, front, rewritten = _findings(skill_dir)
-        name = _skill_name(skill_dir, front)
-        assembled_name = _assembled_name(name, target_spec.environment)
-        properties, advice = _judge(findings, gaps, target_spec)
-        declared = front.get(HOOKS_KEY)
-        hooks = declared if isinstance(declared, Mapping) else {}
-        # Both asked before the branch below and not inside it: whether the target names a
-        # place -- for the skill as a whole, and then for each part of it -- is read off its
-        # layout, so the answer is the same whether or not the caller asked for the bytes.
-        # Inside the branch, `--out` would decide what the transfer is said to cost, and the
-        # same skill on the same pair of descriptions would answer two different things
-        # about itself. The ground first: with nowhere to put a skill file there is nothing
-        # to say about the parts of one, and `_skills_root` refuses the run rather than
-        # answer. It is read here and used below, so that the line cannot be mistaken for a
-        # value nobody wanted and removed as one -- taking the refusal with it.
-        ground = _skills_root(target_spec, scope)
-        stayed = _left_behind(target_spec, scope, properties, hooks)
-        # First, because they happened first: a value was rewritten while the header was
-        # being read, before anything was judged about it.
-        advice = [*rewritten, *advice, *stayed]
-        verdict = worst(entry.verdict for entry in properties)
-        # A part with nowhere to go did not cross, whatever its row says about being
-        # reproduced: exit code 0 on a run that left one behind would be this command
-        # telling a caller there is nothing here to look at.
-        if stayed:
-            verdict = worst([verdict, Verdict.LOSSY])
-        # An undecidable run assembles nothing: the transferable half of a skill whose other
+        found = read(inputs)
+        # Asked once, and before the branch below rather than inside it: whether the target
+        # names a place for a skill file at all is read off its layout, so the answer -- and
+        # the exit code -- is the same whether or not the caller asked for the bytes. Asked
+        # only of a set that holds a skill: a set of rule files loses nothing by a target
+        # that names nowhere to put a skill.
+        if any(asset.kind is Kind.SKILL and asset.name for asset in found):
+            ground = _skills_root(target_spec, scope)
+        for asset in found:
+            entity, said = _assess(asset, gaps, target_spec, inputs.translation, scope)
+            assessed.append(entity)
+            advice += said
+        verdict = worst(entity.verdict for entity in assessed)
+        # An undecidable run assembles nothing: the transferable half of a set whose other
         # half nobody documented is a folder that looks converted and is not.
         if out is not None and verdict is not Verdict.UNDECIDABLE:
             # One spelling of `out` from here down. Every check below counts the levels of a
@@ -1541,60 +1287,54 @@ def convert(
             # nowhere: a link partway down goes unasked and is written through, on a run the
             # report then calls clean.
             out_dir = Path(os.path.normpath(out))
-            parts, asked = _plan(
-                skill_dir,
-                out_dir,
-                target_spec,
-                scope,
-                properties,
-                hooks,
-                root=ground,
-                assembled_name=assembled_name,
-            )
+            parts: list[_Part] = []
+            for entity in assessed:
+                if entity.assembled_name is None:
+                    continue
+                planned, asked = _plan(
+                    entity.asset.path,
+                    out_dir,
+                    target_spec,
+                    scope,
+                    entity.properties,
+                    _hooks_of(entity.asset),
+                    root=ground,
+                    assembled_name=entity.assembled_name,
+                )
+                parts += planned
+                advice += asked
+            # One plan for the whole set, checked whole before the first byte: two skills of
+            # one set aimed at one destination is the same collision as two parts of one
+            # skill, and a check made per entity would not see it.
             written, linked = _assemble(out_dir, parts)
-            advice += asked + linked
-    except (ConvertError, OSError) as error:
-        # Two shapes of refusal and one answer: what this module raised and what the
-        # filesystem raised both leave as a report and a code, so that reading the answer
-        # never costs a caller knowing which exceptions live in here.
+            advice += linked
+    except (ConvertError, ReadError, OSError) as error:
+        # Three shapes of refusal and one answer: what this module raised, what the reading of
+        # the set raised and what the filesystem raised all leave as a report and a code, so
+        # that reading the answer never costs a caller knowing which exceptions live in here.
         if isinstance(error, ConvertError):
             stopped = error
+        elif isinstance(error, ReadError):
+            # The reading carries no code of its own: every one of its refusals is about a
+            # path the caller named, which is the set this run could not read.
+            stopped = ConvertError(str(error), UNREADABLE)
         else:
             # Named by the error and not by the argument: a description of this repository
-            # that would not open is not the caller's skill folder, and saying it was sends
-            # a person to read the wrong file for a fault that is not in it.
+            # that would not open is not the caller's set, and saying it was sends a person
+            # to read the wrong file for a fault that is not in it.
             stopped = ConvertError(
-                f"{error.filename or skill_dir}: could not be read ({error})", side
+                f"{error.filename}: could not be read ({error})"
+                if error.filename
+                else f"the set could not be read ({error})",
+                side,
             )
         # A refusal that exits with one of the table's own codes is that verdict: not
-        # knowing where the skill goes is not knowing what the transfer amounts to. Which
+        # knowing where the set goes is not knowing what the transfer amounts to. Which
         # codes those are is `REFUSAL_VERDICT`, and the rest leave the computed one alone.
         verdict = REFUSAL_VERDICT.get(stopped.exit_code, verdict)
         report = _report(
-            skill_dir,
-            source,
-            target,
-            verdict,
-            stopped.exit_code,
-            properties,
-            advice,
-            written,
-            str(stopped),
-            name=name,
-            assembled_name=assembled_name,
+            source, target, verdict, stopped.exit_code, assessed, advice, written, str(stopped)
         )
         return Conversion(verdict, stopped.exit_code, report, _summary(report))
-    report = _report(
-        skill_dir,
-        source,
-        target,
-        verdict,
-        EXIT_CODE[verdict],
-        properties,
-        advice,
-        written,
-        None,
-        name=name,
-        assembled_name=assembled_name,
-    )
+    report = _report(source, target, verdict, EXIT_CODE[verdict], assessed, advice, written, None)
     return Conversion(verdict, EXIT_CODE[verdict], report, _summary(report))

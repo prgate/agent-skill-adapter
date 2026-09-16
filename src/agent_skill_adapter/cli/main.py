@@ -1,6 +1,7 @@
 """CLI entrypoint for agent-skill-adapter."""
 
 import json
+import os.path
 import sys
 from pathlib import Path
 from typing import Annotated
@@ -8,7 +9,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from agent_skill_adapter import __version__
+from agent_skill_adapter import __version__, assets, rules
 from agent_skill_adapter import convert as convert_module
 
 # ponytail: found beside the source tree, which holds for a checkout and for the editable
@@ -22,6 +23,13 @@ one it usually finds is none: the run then ends at exit code 3 saying the descri
 could not be read -- the same code as a skill the descriptions leave undecided. Two very
 different answers under one number, and the one that is about the caller's folder rather
 than about their skill is the one that reads as a verdict it is not.
+"""
+
+RULES = Path(__file__).resolve().parents[3] / "rules" / "claude-code-to-antigravity-1.0.yaml"
+"""The translation rules this repository ships, found the same way and for the same reason.
+
+# ponytail: one file, named here. The option that lets a caller name another arrives with
+# the options that name the rest of the composition of a set.
 """
 
 app = typer.Typer(
@@ -87,8 +95,12 @@ def convert_command(
     same run in words goes to the error stream. Nothing is written to the skill or anywhere
     else unless `--out` names a folder to assemble into, and then only under that folder.
     """
+    # One skill folder is a composition of one part, and means what it has always meant.
+    # Spelled out in full first: a folder given as `.` has no last component to be named by,
+    # and the report names every entity by the path it was read from.
+    inputs = assets.Inputs(translation=rules.load(RULES), skill=(Path(os.path.abspath(skill_dir)),))
     result = convert_module.convert(
-        skill_dir, source, target, root=specs, out=out, scope=scope, allow_stale=allow_stale
+        inputs, source, target, root=specs, out=out, scope=scope, allow_stale=allow_stale
     )
     saved = False
     if report is not None:

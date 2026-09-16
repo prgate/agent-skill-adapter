@@ -8,6 +8,7 @@ a repository happened to give the folder.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -255,3 +256,131 @@ def test_a_link_deeper_than_the_top_of_a_skill_is_said_out_loud_too(tmp_path: Pa
 
     said = {finding.found_as for finding in alpha.findings if not finding.ids}
     assert "notes/linked/" in said
+
+
+def nested(levels: int) -> bytes:
+    """A frontmatter whose one key nests `levels` mappings deep and is valid YAML throughout."""
+    rungs = "".join(f"{'  ' * (level + 1)}k{level}:\n" for level in range(levels))
+    header = (
+        f"name: example\ndescription: what it does\nnest:\n{rungs}{'  ' * (levels + 1)}leaf: x\n"
+    )
+    return f"---\n{header}---\n\nBody.\n".encode()
+
+
+BROKEN: dict[str, bytes | None] = {
+    "no-skill-file": None,
+    "unclosed-frontmatter": b"---\nname: example\n\nBody, and no closing line.\n",
+    "invalid-yaml": b"---\nname: [unclosed\n---\n\nBody.\n",
+    "duplicate-key": b"---\nname: one\nname: two\ndescription: what it does\n---\n\nBody.\n",
+    "duplicate-normalized-key": b"---\ndescription: what it does\nhooks:\n  PreToolUse:\n"
+    b"    2026-09-14: from-date-key\n    '2026-09-14': from-string-key\n---\n\nBody.\n",
+    "duplicate-written-key": b"---\ndescription: what it does\nhooks:\n  PreToolUse:\n"
+    b"    1: from-int-key\n    '1': from-string-key\n---\n\nBody.\n",
+    "unhashable-key": b"---\ndescription: what it does\n? [a, b]\n: v\n---\n\nBody.\n",
+    "unstable-set": b"---\ndescription: what it does\nhooks: !!set {alpha, beta}\n---\n\nBody.\n",
+    "unstable-bytes": b"---\ndescription: what it does\nseed: !!binary aGk=\n---\n\nBody.\n",
+    "nonfinite-nan": b"---\ndescription: what it does\nweight: .nan\n---\n\nBody.\n",
+    "nonfinite-infinity": b"---\ndescription: what it does\nweight: .inf\n---\n\nBody.\n",
+    "nonfinite-negative-infinity": b"---\ndescription: what it does\nweight: -.inf\n---\n\nBody.\n",
+    "byte-order-mark": b"\xef\xbb\xbf---\nname: example\ndescription: d\n---\n\nBody.\n",
+    "no-opening-line": b"name: example\ndescription: what it does\n---\n\nBody.\n",
+    "not-a-mapping": b"---\n- name: example\n- description: what it does\n---\n\nBody.\n",
+    "not-utf-8": b"---\nname: \xff\ndescription: what it does\n---\n\nBody.\n",
+    "anchor-and-alias": b"---\nname: &n example\ndescription: *n\n---\n\nBody.\n",
+    "oversize": b"---\nname: example\ndescription: " + b"x" * 200_000 + b"\n---\n\nBody.\n",
+    "too-deep": nested(40),
+    "no-description": b"---\nname: example\n---\n\nBody.\n",
+    "file-too-large": b"---\nname: example\ndescription: what it does\n---\n\n"
+    + b"x" * 1024 * 1024,
+}
+"""Twenty-one ways a skill file is not one. Each must stop the reading rather than be read
+halfway.
+
+A set and a block of bytes are here because neither has a text it always reads back as: the
+same header would put different bytes in the assembled file on every run, and a converter
+whose output moves on a fixed input cannot be checked against anything. `.nan`, `.inf` and
+`-.inf` are here for the other half of the same rule: JSON has no such number, and
+`json.dumps` writes them as a bare `NaN` or `Infinity` that a strict reader refuses -- the
+file would leave here looking assembled and arrive as something the target cannot load.
+"""
+
+
+@pytest.mark.parametrize("case", sorted(BROKEN))
+def test_a_folder_that_is_not_a_skill_is_refused_by_what_is_wrong_with_it(
+    tmp_path: Path, case: str
+) -> None:
+    """A refusal naming the path, and never a header read halfway.
+
+    A duplicate key is here because PyYAML keeps the last of the two without a word: read
+    and not refused, the frontmatter would convert as a value nobody chose. Two keys that
+    become one only once the header is carried across are the same duplicate, made by this
+    command rather than by the person, and are refused the same way. An anchor and its alias
+    are the same defect in another spelling -- what a reader sees in the file and what the
+    parser builds stop being the same text (FR-15). A header without `description` is a
+    missing required field, which FR-16 counts as a structural break and not as an optional
+    field left out; `name` is not in that company.
+    """
+    folder = tmp_path / "example"
+    folder.mkdir()
+    content = BROKEN[case]
+    if content is not None:
+        (folder / "SKILL.md").write_bytes(content)
+
+    with pytest.raises(assets.ReadError) as refusal:
+        assets.read(assets.Inputs(translation=rules_for(tmp_path), skill=(folder,)))
+
+    assert str(folder) in str(refusal.value)
+
+
+def test_two_header_keys_that_carry_across_as_one_are_both_named(tmp_path: Path) -> None:
+    """A date key and the quoted text of it are two keys in the file and one after carrying.
+
+    Whichever of the two values is dropped, dropping it silently is the failure this command
+    exists to prevent, so the reading stops. The message names the place inside the header and
+    both keys as they are written there: "a key was lost" is nothing a person can act on
+    without knowing which, and the two read the same once either is a plain string.
+    """
+    folder = tmp_path / "example"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text(
+        "---\ndescription: what it does\nhooks:\n  PreToolUse:\n"
+        "    2026-09-14: from-date-key\n    '2026-09-14': from-string-key\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(assets.ReadError) as refusal:
+        assets.read(assets.Inputs(translation=rules_for(tmp_path), skill=(folder,)))
+
+    said = str(refusal.value)
+
+    assert "frontmatter.hooks.PreToolUse" in said
+    # As the header writes them: the date bare, the text quoted. A Python `repr` would name
+    # the type instead -- `datetime.date(2026, 9, 14)` -- which is a string the file does not
+    # contain, and the module refuses to name a value by its type.
+    assert re.search(r"(?<!['\w])2026-09-14(?!['\w])", said)
+    assert "'2026-09-14'" in said
+    assert "datetime" not in said
+
+
+def test_a_value_the_header_had_to_rewrite_to_cross_is_named(tmp_path: Path) -> None:
+    """The reading says which value changed shape, what it was and what it became.
+
+    Unsaid, the only trace of a value entering as a date and leaving as text would be the
+    text itself, and nothing downstream could tell a rewritten value from a written one.
+    """
+    folder = tmp_path / "example"
+    folder.mkdir()
+    (folder / "SKILL.md").write_text(
+        "---\ndescription: what it does\nmodel: 2026-09-14\n---\n\nBody.\n", encoding="utf-8"
+    )
+
+    read = assets.read(assets.Inputs(translation=rules_for(tmp_path), skill=(folder,)))
+    said = [
+        finding.note
+        for finding in read[0].findings
+        if finding.note and "frontmatter.model" in finding.note
+    ]
+
+    assert len(said) == 1
+    assert "date" in said[0]
+    assert "2026-09-14" in said[0]
