@@ -51,22 +51,34 @@ Not part of the section.
 SECOND_URL = "https://example.invalid/docs/hooks"
 
 
-def write_spec(root: Path, sha256: str, *, second_source: bool = False) -> Path:
+SHIPPED_URL = "file:///opt/cli/builtin/skills/docs/skills.md"
+WRONG_SHA = "0" * 64
+
+
+def write_spec(
+    root: Path, sha256: str, *, second_source: bool = False, shipped_source: bool = False
+) -> Path:
     """Write a description whose sources record ``sha256`` for the page section."""
 
-    def source(source_id: str, url: str) -> list[str]:
+    def source(
+        source_id: str, url: str, *, sha: str | None = None, shipped: bool = False
+    ) -> list[str]:
         return [
             f"  - id: {source_id}",
             f"    url: {url}",
             f'    anchor: "{ANCHOR}"',
-            f'    sha256: "{sha256}"',
+            f'    sha256: "{sha or sha256}"',
             f"    checked_at: {TODAY}",
             '    environment_version: "2.1.270"',
+            *(["    retrieved_from: shipped"] if shipped else []),
         ]
 
     sources = source("skills-frontmatter", "https://example.invalid/docs/skills")
     if second_source:
         sources += source("hooks-config", SECOND_URL)
+    if shipped_source:
+        # A hash that no page can match, so a run that fetched it would file a discrepancy.
+        sources += source("shipped-doc", SHIPPED_URL, sha=WRONG_SHA, shipped=True)
     text = "\n".join(
         [
             "schema_version: 1",
@@ -94,6 +106,19 @@ def write_spec(root: Path, sha256: str, *, second_source: bool = False) -> Path:
 def recorded_sha() -> str:
     """The hash a freshness run would have written when the page still read like ``PAGE``."""
     return digest(section_text(PAGE, ANCHOR))
+
+
+def test_a_shipped_source_is_never_fetched(tmp_path: Path) -> None:
+    """A section that came with the CLI has no page to re-read, so the run leaves it alone."""
+    spec = load(write_spec(tmp_path, recorded_sha(), shipped_source=True))
+    asked: list[str] = []
+
+    def fetch(url: str) -> str:
+        asked.append(url)
+        return PAGE
+
+    assert check(spec, fetch=fetch, today=TODAY) == []
+    assert asked == ["https://example.invalid/docs/skills.md"]
 
 
 def test_changed_section_text_reports_both_hashes(tmp_path: Path) -> None:

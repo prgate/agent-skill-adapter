@@ -185,8 +185,7 @@ limits:
     unit: characters
     source_id: frontmatter
 
-# A specification names no tool of its own and reads no configuration outside the skill.
-tool_names: []
+# A specification reads no configuration outside the skill.
 invisible_sources: []
 
 discrepancies: []

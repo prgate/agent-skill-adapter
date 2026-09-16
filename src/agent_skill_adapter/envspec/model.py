@@ -67,6 +67,12 @@ class Source(_Identified):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     checked_at: date
     environment_version: str = Field(min_length=1)
+    retrieved_from: Literal["web", "shipped"] = "web"
+    """Where the section was read: a public page, or a file the environment ships.
+
+    A shipped section is documentation all the same, but there is no page to re-read, so
+    the freshness run skips it rather than reaching for a URL that answers to nobody.
+    """
 
 
 class Capability(_Entry):
@@ -82,6 +88,15 @@ class Capability(_Entry):
     """
 
     support: Support
+    values: list[str] | None = None
+    """The closed set of values the documentation names for this field, in its own wording.
+
+    Absent means the documentation names no set, never that any value will do: without a
+    set there is nothing to translate a value onto, and the entry stays undecided. A set
+    invented from what one asset happens to contain would be a rule read off an
+    observation, which is exactly what a description is here to replace.
+    """
+
     since_version: str | None = None
     note: str | None = None
 
@@ -97,13 +112,6 @@ class Limit(_Entry):
 
     value: int = Field(ge=0)
     unit: Literal["bytes", "characters", "tokens"]
-
-
-class ToolName(_Sourced):
-    """How a tool name of one environment is spelled in another."""
-
-    from_name: str = Field(alias="from", min_length=1)
-    to_name: str = Field(alias="to", min_length=1)
 
 
 class InvisibleSource(_Entry):
@@ -150,7 +158,6 @@ class EnvSpec(_Strict):
     capabilities: list[Capability] = Field(default_factory=list)
     layout: list[LayoutEntry] = Field(default_factory=list)
     limits: list[Limit] = Field(default_factory=list)
-    tool_names: list[ToolName] = Field(default_factory=list)
     invisible_sources: list[InvisibleSource] = Field(default_factory=list)
     discrepancies: list[Discrepancy] = Field(default_factory=list)
 
@@ -177,7 +184,6 @@ class EnvSpec(_Strict):
 
         sourced: list[tuple[str, Sequence[_Sourced]]] = [
             *identified,
-            ("tool_names", self.tool_names),
             ("discrepancies", self.discrepancies),
         ]
         for where, records in sourced:

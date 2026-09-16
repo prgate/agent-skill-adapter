@@ -41,6 +41,17 @@ sources:
     sha256: "f895005cfd0602be4dbe24364803ea8099572f620d5f129adf2a92b1beda1c04"
     checked_at: 2026-09-14
     environment_version: "2.0"
+  # Not a public page: a skill the CLI installs alongside itself, read from the install
+  # (`~/.gemini/antigravity-cli/builtin/skills/`, build `agy 1.2.4`). It is the environment's
+  # own documentation of its own format, so it is a source like any other — but there is no
+  # page to re-fetch, hence `retrieved_from: shipped`, which the freshness run skips.
+  - id: skills-shipped-structure
+    url: "~/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/skills.md"
+    anchor: "Directory Structure"
+    sha256: "d3875f4469ce29b35190a43722b7f19748ce41ade38c78593971e49106db1485"
+    checked_at: 2026-09-16
+    environment_version: "2.0"
+    retrieved_from: shipped
   - id: subagents-frontmatter
     url: https://antigravity.google/docs/subagents
     markdown_url: https://antigravity.google/docs/subagents.md
@@ -298,6 +309,9 @@ capabilities:
     kind: subagent-field
     support: supported
     source_id: subagents-frontmatter
+    # The three the frontmatter table names, in its own spelling. A tier, not a model
+    # identifier, so a source value naming a model has no counterpart here by construction.
+    values: ["inherit", "flash", "pro"]
     note: "Model tier: `inherit`, `flash` or `pro`. Not a model identifier."
   - id: subagent.frontmatter.color
     kind: subagent-field
@@ -705,15 +719,22 @@ layout:
   - id: skill.dir.scripts
     path: "<skill-name>/scripts/"
     source_id: skills-structure
-  # Two bundle directories with no counterpart in the specification: it names `references/`
-  # and `assets/`, this page names these. Different names are different places, and reading
-  # one as the other would credit Antigravity with reproducing something it never wrote.
+  # One bundle directory with no counterpart in the specification, which names `references/`
+  # and `assets/`. Different names are different places, and reading one as the other would
+  # credit Antigravity with reproducing something it never wrote.
   - id: skill.dir.examples
     path: "<skill-name>/examples/"
     source_id: skills-structure
   - id: skill.dir.resources
     path: "<skill-name>/resources/"
     source_id: skills-structure
+  # `references/` and `resources/` are two places, not one renamed: the public page draws
+  # the tree without `references/`, the skill the CLI ships draws it with both. Neither
+  # says the other is wrong, so both are recorded, each against the source that names it,
+  # and nothing about a bundle is renamed on the way across.
+  - id: skill.dir.references
+    path: "<skill-name>/references/"
+    source_id: skills-shipped-structure
   - id: skills.project
     path: "<workspace-root>/.agents/skills/"
     source_id: skills-location
@@ -770,13 +791,6 @@ limits:
     value: 12000
     unit: characters
     source_id: rules-overview
-
-# Empty, and that emptiness is itself a finding: see `agent.tool-names.mapping` above.
-# The documentation names the Antigravity tool set under "Supported Tools" but nowhere
-# states how a Claude Code tool name maps onto an Antigravity one — the word "Claude"
-# appears in it only as a model name and in an FAQ answer about third-party clients.
-# Pairing `Read` with `view_file` would be our guess, not the vendor's statement.
-tool_names: []
 
 # Only the source environment declares configuration the adapter cannot see (R28).
 invisible_sources: []

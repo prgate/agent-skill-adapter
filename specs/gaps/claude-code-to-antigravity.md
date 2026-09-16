@@ -8,9 +8,9 @@ This list is computed, not written: it is the output of comparing the two enviro
 
 | outcome | entries | of which declared by the open specification | of which absent from the target description |
 | --- | --- | --- | --- |
-| reproduced | 26 | 6 | 0 |
+| reproduced | 27 | 7 | 0 |
 | missing | 0 | 0 | 0 |
-| unknown | 74 | 4 | 11 |
+| unknown | 73 | 3 | 10 |
 | out-of-scope | 3 | 3 | 0 |
 
 ## Entries
@@ -75,7 +75,7 @@ This list is computed, not written: it is the output of comparing the two enviro
 | skill.body.content | skill-field | specification | supported | supported | reproduced | the Markdown body after the frontmatter holds the skill instructions; "There are no format restrictions"; recommended sections are step-by-step instructions, examples of inputs and outputs, common edge cases -> The Markdown body after the frontmatter holds the instructions the agent follows. |
 | skill.body.file-references | skill-field | specification | supported | unknown | unknown | other files are referenced by relative paths from the skill root; "Keep file references one level deep from `SKILL.md`. Avoid deeply nested reference chains" -> (no matching entry in the target description) |
 | skill.dir.assets | layout | specification | supported | unknown | unknown | <skill-name>/assets/ -> (no matching entry in the target description) |
-| skill.dir.references | layout | specification | supported | unknown | unknown | <skill-name>/references/ -> (no matching entry in the target description) |
+| skill.dir.references | layout | specification | supported | supported | reproduced | <skill-name>/references/ -> <skill-name>/references/ |
 | skill.dir.scripts | layout | specification | supported | supported | reproduced | <skill-name>/scripts/ -> <skill-name>/scripts/ |
 | skill.file | layout | specification | supported | supported | reproduced | <skill-name>/SKILL.md -> <skill-name>/SKILL.md |
 | skill.file.format | skill-field | specification | supported | supported | reproduced | "The `SKILL.md` file must contain YAML frontmatter followed by Markdown content" -> "Every skill needs a `SKILL.md` file with YAML frontmatter at the top", followed by Markdown. |
