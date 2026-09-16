@@ -36,6 +36,7 @@ from agent_skill_adapter.assets import (
     EVENT,
     HOOKS_KEY,
     LINKED,
+    PARTS,
     SKILL_DIR,
     SKILL_MD,
     SKILL_TOP,
@@ -156,9 +157,34 @@ follow are `unknown` from an `extension` -- the report row the specification ask
 name (story 5), because what happens to them is decided by a rule of ours and not by
 anything either environment documents.
 
-Keyed by the reason and not by the shape of the finding: a finding with no id and a reason
-not in this table is not about a path at all but about a value the header had to rewrite to
-cross, and that is a line of advice rather than a row.
+Keyed by the reason and not by the shape of the finding. A reason not in this table is not
+taken for one of them and not passed over either: `UNWEIGHED` says so in a row of its own,
+because a reading that grew a fifth reason must not reach a caller as a clean verdict.
+"""
+
+UNWEIGHED = (
+    "the reading gave a reason this run has no rule for, so nothing here could be weighed "
+    "against the descriptions; the row is `unknown` because a reason nobody could read is "
+    "not a reason to call the transfer clean"
+)
+"""Why a path with a reason :data:`ASKS_NOTHING` does not know is `unknown` and not `clean`.
+
+The two modules version together and this cannot happen today. It is written down rather
+than assumed because the cost of being wrong is one-sided: a reason silently taken for
+nothing turns a lost file into an exit code 0, which is the one answer this command must
+never give.
+"""
+
+REWRITTEN_VALUE = "frontmatter of "
+"""How the reading spells a finding about a value it had to rewrite rather than about a path.
+
+Such a finding is the one that leaves a line of advice instead of a row: there is no path to
+account for, and the value did cross -- as the text the line names. Asked after the reason
+has been looked up in :data:`ASKS_NOTHING`, so that a file whose own name begins with these
+words keeps the row its reason earned it.
+
+# ponytail: matched on the words the reading uses, because a `Finding` carries no kind to
+# ask for. The way up is a kind on `Finding`, which is the reading's own to add.
 """
 
 _HOW_TO_KEEP_A_HOOK = (
@@ -372,11 +398,13 @@ def _judge(
             asked_by.setdefault(entry_id, []).append(finding.found_as)
         if finding.ids:
             continue
-        row = _asked_nothing(finding, translation)
-        if row is None:
-            rewritten.append(finding.note or finding.found_as)
+        # The reason first and the shape of the finding second: a reason the table knows is
+        # about a path however the path is spelled, and only a finding left over by that is
+        # about a value. Reversed, a file called `frontmatter of ours.md` would lose its row.
+        if finding.note in ASKS_NOTHING or not finding.found_as.startswith(REWRITTEN_VALUE):
+            asked_nothing.append(_asked_nothing(finding, translation))
         else:
-            asked_nothing.append(row)
+            rewritten.append(finding.note or finding.found_as)
     properties: list[Property] = []
     advice: list[str] = []
     for entry_id, found_as in asked_by.items():
@@ -411,18 +439,26 @@ def _judge(
     return [*asked_nothing, *properties], [*rewritten, *advice]
 
 
-def _asked_nothing(finding: Finding, translation: Rules) -> Property | None:
-    """The row a finding that names no entry id earns, or ``None`` when it is not about a path.
+def _asked_nothing(finding: Finding, translation: Rules) -> Property:
+    """The row a finding that names no entry id earns. There is always one.
 
     The reason the reading gave decides the outcome (:data:`ASKS_NOTHING`) and a path nobody
     declared carries the one rule the translation states for such a file, in its own words:
     FR-30 asks for one rule and one row per undeclared file, and two wordings of it -- the
     reading's and the rules' -- would be two rules as soon as either changed.
+
+    A reason the table does not know is `unknown` and says why (:data:`UNWEIGHED`), and its
+    verdict is counted with every other: a row whose weight is not added is a row that makes
+    an entity look clean for the one reason nobody could read.
     """
-    outcome = ASKS_NOTHING.get(finding.note or "")
-    if outcome is None:
-        return None
-    note = translation.undocumented.note if finding.note == UNDECLARED_PATH else finding.note
+    known = ASKS_NOTHING.get(finding.note or "")
+    outcome = known if known is not None else Outcome.UNKNOWN
+    if known is None:
+        note = f"{finding.note}; {UNWEIGHED}" if finding.note else UNWEIGHED
+    elif finding.note == UNDECLARED_PATH:
+        note = translation.undocumented.note
+    else:
+        note = finding.note or UNWEIGHED
     return Property(
         id=None,
         found_as=finding.found_as,
@@ -1181,6 +1217,31 @@ def refused(result: Conversion, exit_code: int, message: str) -> Conversion:
     return Conversion(result.verdict, exit_code, report, _summary(report))
 
 
+def _nothing_there(inputs: Inputs) -> list[str]:
+    """Every path the composition names that is not on the filesystem at all.
+
+    Asked before the set is read, and here rather than in the reading, because the reading
+    opens a named skill folder by asking for its skill file and so answers a path that does
+    not exist with the words for a folder that holds no skill file. That sends a person with
+    a typo in the path looking for a `SKILL.md` inside a folder nobody has. Which paths were
+    named is `PARTS`, the reading's own list of them, so a part added there is asked about
+    here without a line added.
+
+    A broken symbolic link is something at the path: what is wrong with it is what it points
+    at, and the reading names that itself.
+    """
+    named: list[Path] = []
+    for part in PARTS:
+        # A part may be absent -- `plugin` as `None`, a folder tuple as an empty one -- and an
+        # absent part is not a path that is missing. Every part that is there is a path or a
+        # tuple of them, which is the whole of what the composition can hold.
+        value = getattr(inputs, part)
+        if value is None:
+            continue
+        named += [value] if isinstance(value, Path) else list(value)
+    return [str(path) for path in named if not (path.exists() or path.is_symlink())]
+
+
 def _hooks_of(asset: Asset) -> Mapping[str, Any]:
     """The hooks an entity declares in its header, or none: only a mapping is a set of them."""
     declared = asset.frontmatter.get(HOOKS_KEY)
@@ -1264,6 +1325,15 @@ def convert(
     try:
         gaps, target_spec = _gaps(root, source, target, allow_stale)
         side = UNREADABLE
+        absent = _nothing_there(inputs)
+        if absent:
+            raise ConvertError(
+                ", ".join(absent) + ": there is nothing at this path, so no part of a set "
+                "could be read from it; the composition names what this run reads, and a "
+                "path in it that is not there is a path to correct rather than a set to "
+                "judge",
+                UNREADABLE,
+            )
         found = read(inputs)
         # Asked once, and before the branch below rather than inside it: whether the target
         # names a place for a skill file at all is read off its layout, so the answer -- and

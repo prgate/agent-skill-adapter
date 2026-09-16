@@ -13,7 +13,8 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from agent_skill_adapter.assets import Inputs
+from agent_skill_adapter import convert as convert_module
+from agent_skill_adapter.assets import Asset, Finding, Inputs, Kind
 from agent_skill_adapter.cli.main import app
 from agent_skill_adapter.convert import WORKAROUNDS, Conversion, Scope, Verdict
 from agent_skill_adapter.convert import convert as convert_set
@@ -257,6 +258,29 @@ def test_a_folder_that_could_not_be_read_stops_the_run_and_still_reports(
     assert result.report["assets"] == []
     assert result.report["report_schema"] == 2
     assert str(folder) in result.report["error"]
+    # The folder is there and holds no skill file, so that is what the refusal says. The
+    # case below is the other one, and the two must not answer in each other's words.
+    assert "SKILL.md" in result.report["error"]
+
+
+def test_a_path_that_is_not_there_is_refused_as_a_path_and_not_as_a_missing_skill_file(
+    tmp_path: Path,
+) -> None:
+    """A path nobody has is a path to correct, and the refusal says so in those words.
+
+    Answered with "no SKILL.md here", a person with a typo in the path is sent looking for a
+    file inside a folder that does not exist -- a true sentence about nothing, and the wrong
+    thing to go and do. The code and the report are the same either way; the reason is not.
+    """
+    root = four_row_tree(tmp_path)
+    missing = tmp_path / "definitely-not-there"
+
+    result = convert(missing, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert (result.verdict, result.exit_code) == (Verdict.UNDECIDABLE, 6)
+    assert result.report["assets"] == []
+    assert str(missing) in result.report["error"]
+    assert "SKILL.md" not in result.report["error"]
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 000 does not stop root from reading")
@@ -1597,6 +1621,44 @@ def test_a_rewritten_header_value_is_named_in_the_report(tmp_path: Path) -> None
     assert len(said) == 1
     assert "date" in said[0]
     assert "2026-09-14" in said[0]
+
+
+def test_a_reason_the_run_has_no_rule_for_is_a_row_whose_verdict_still_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finding whose reason this run cannot weigh is `unknown`, and the run is not clean.
+
+    The reading and this command version together, so a fifth reason cannot arrive today.
+    The cost of being wrong about it is one-sided: taken for nothing to say, a reason nobody
+    could read turns a lost file into exit code 0 -- an entity called clean because the
+    program did not recognise why it was not. So the row is there, its verdict is counted
+    with every other, and the words the reading used are still in it.
+
+    The reading is replaced here rather than provoked: it has no fifth reason to give, and a
+    rule about what to do with one cannot be pinned by a set that cannot produce it.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    unheard_of = Finding("scratch/", (), "a reason nobody has written a rule for")
+    monkeypatch.setattr(
+        convert_module, "read", lambda inputs: (Asset(Kind.SKILL, folder, "", {}, (unheard_of,)),)
+    )
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+    named = {
+        entry["found_as"]: entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if entry["id"] is None
+    }
+
+    assert named["scratch/"]["outcome"] == "unknown"
+    assert named["scratch/"]["verdict"] == "lossy"
+    assert unheard_of.note in (named["scratch/"]["note"] or "")
+    # The whole of it: a row that is there and whose weight is not added answers the same as
+    # no row at all to a caller reading the code.
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+    assert not any(unheard_of.note in line for line in result.report["advice"])
 
 
 def a_set(tmp_path: Path) -> Inputs:
