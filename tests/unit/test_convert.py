@@ -2266,6 +2266,7 @@ MOVING = Rules.model_validate(
             # pair -- what was written, and what it becomes.
             "rules.frontmatter.trigger": {"": "always_on"},
         },
+        "rewrite": {"include": ["*.md"], "exclude": ["CHANGELOG.md"]},
         "undocumented": {"action": "copy", "note": "nothing declares this file"},
     }
 )
@@ -2300,6 +2301,7 @@ def destinations_tree(tmp_path: Path) -> Path:
         capabilities=target,
         layout=[
             {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skill.top.CHANGELOG.md", "path": "<skill-name>/CHANGELOG.md"},
             {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
             {"id": "agents.project", "path": ".agents/agents/"},
             {"id": "agents.user", "path": "~/.gemini/config/agents/"},
@@ -2602,3 +2604,181 @@ def test_an_undocumented_path_is_never_staged_in_a_root_the_target_scans_for_ent
     assert (out / "bundles/_templates/note.md").read_text(encoding="utf-8") == "A template.\n"
     assert (out / ".agents/skills/alpha-antigravity/SKILL.md").is_file()
     assert str(out / "bundles/_templates") in {entry["path"] for entry in result.report["written"]}
+
+
+def linking_subagents(folder: Path, addresses: str) -> Path:
+    """A subagent whose body addresses another file of the set by a relative path."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "note-keeper.md").write_text(
+        "---\nname: note-keeper\ndescription: keeps notes\nmodel: sonnet\n---\n\n"
+        f"Follow `{addresses}` when writing.\n",
+        encoding="utf-8",
+    )
+    return folder
+
+
+def test_an_address_of_a_moved_file_points_at_where_this_run_put_it(tmp_path: Path) -> None:
+    """The point of the whole rule: the two files move apart, and the address moves with them.
+
+    A subagent goes to the agents root and the rule file it names goes to the rules root, so
+    the path that reached one from the other in the source set reaches nothing in the target.
+    Left alone it is a role sending itself to a mode that is not there. The new address is
+    worked out from where the two parts landed, and both of those are read off the target
+    description.
+    """
+    root = destinations_tree(tmp_path)
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("Be brief.\n", encoding="utf-8")
+    roles = linking_subagents(tmp_path / "set" / "roles", "../policy/tone.md")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(roles,), rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert "`../rules/tone.md`" in staged
+    assert "../policy/tone.md" not in staged
+    assert (out / ".agents/agents" / "../rules/tone.md").resolve().is_file()
+    assert [(entry["from"], entry["to"]) for entry in result.report["links"]] == [
+        ("../policy/tone.md", "../rules/tone.md")
+    ]
+
+
+def test_an_address_of_a_file_that_stayed_where_it_was_is_left_exactly_as_written(
+    tmp_path: Path,
+) -> None:
+    """Only what moved is repointed. A command is assembled nowhere, so its path still holds.
+
+    Rewriting it would aim the subagent at a place under `--out` where nothing was ever
+    written, turning an address that still works into one that does not -- and the run would
+    report the damage as work done.
+    """
+    root = destinations_tree(tmp_path)
+    shortcuts = tmp_path / "set" / "shortcuts"
+    shortcuts.mkdir(parents=True)
+    (shortcuts / "note.md").write_text("Take a note.\n", encoding="utf-8")
+    roles = linking_subagents(tmp_path / "set" / "roles", "../shortcuts/note.md")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(roles,), commands=(shortcuts,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert "`../shortcuts/note.md`" in staged
+    assert result.report["links"] == []
+    assert not [line for line in result.report["advice"] if "../shortcuts/note.md" in line]
+
+
+def test_an_address_leading_out_of_the_set_is_left_alone_and_named_in_the_report(
+    tmp_path: Path,
+) -> None:
+    """Nobody here can work out what it should become, and silence would hide that from the caller.
+
+    The composition names what this run was given; a path under none of it points at a file
+    this run never saw, never moved and can say nothing about beyond that it is still written
+    the way it was.
+    """
+    root = destinations_tree(tmp_path)
+    roles = linking_subagents(tmp_path / "set" / "roles", "../../house/style.md")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(roles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert "`../../house/style.md`" in staged
+    assert result.report["links"] == []
+    assert [line for line in result.report["advice"] if "../../house/style.md" in line]
+
+
+def test_the_change_history_is_carried_over_byte_for_byte(tmp_path: Path) -> None:
+    """The one file the rules keep out of substitution, and the one test that it stays out.
+
+    A change history is a record of what was written. An address inside it is part of that
+    record, and a run that repointed it would leave a record of what we wish had been
+    written -- so the file arrives with the address still leading where it led, which is
+    exactly the state the exclusion promises.
+    """
+    root = destinations_tree(tmp_path)
+    folder = skill(tmp_path / "set" / "bundles" / "note-taker", "name: note-taker\n")
+    history = "# History\n\n- Moved the rules to `../../policy/tone.md`.\n"
+    (folder / "CHANGELOG.md").write_text(history, encoding="utf-8")
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("Be brief.\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, skill=(folder,), rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    carried = out / ".agents/skills/note-taker-antigravity/CHANGELOG.md"
+    assert carried.read_bytes() == history.encode("utf-8")
+    assert result.report["links"] == []
+
+
+def test_a_link_definition_of_a_moved_file_is_named_even_though_it_is_not_repointed(
+    tmp_path: Path,
+) -> None:
+    """Not rewriting it is a ceiling; not saying so would be the silence this command is against.
+
+    A definition stands in one place and is used from another, and the substitution here only
+    ever edits an address where it stands -- so a file that moved keeps a definition pointing
+    at where it used to be. That is a broken file, and a broken file the caller is told about
+    is a different thing from a broken file nobody mentions. The row names both the address
+    as written and the place to point it at.
+    """
+    root = destinations_tree(tmp_path)
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("Be brief.\n", encoding="utf-8")
+    roles = tmp_path / "set" / "roles"
+    roles.mkdir(parents=True)
+    (roles / "note-keeper.md").write_text(
+        "---\nname: note-keeper\ndescription: keeps notes\nmodel: sonnet\n---\n\n"
+        "Follow [tone][t] when writing.\n\n[t]: ../policy/tone.md\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(roles,), rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert "[t]: ../policy/tone.md\n" in staged
+    assert result.report["links"] == []
+    assert [
+        line
+        for line in result.report["advice"]
+        if "../policy/tone.md" in line and "../rules/tone.md" in line
+    ]

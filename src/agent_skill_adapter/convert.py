@@ -26,7 +26,7 @@ import os.path
 import re
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -1382,6 +1382,245 @@ def _links_within(copied_from: Path, label: str) -> list[str]:
     ]
 
 
+_ADDRESSED = re.compile(r"\]\((?P<link>[^)\s]+)[^)\n]*\)|`(?P<code>[^`\n]+)`")
+"""The two ways one file of a set addresses another where it stands: a link, and inline code.
+
+Both, because both are how the sets these rules were written against are actually written --
+a subagent says ``Follow `../policy/tone.md` `` as readily as it says ``[tone](...)``, and an
+address that only one of the two spellings reaches is an address left pointing at nothing.
+
+# ponytail: an address inside a fenced code block is rewritten when it happens to sit on one
+# line with a backtick each side, because nothing here tracks fences. That is the right
+# answer more often than not -- the file really did move, and the substitution is reported
+# either way -- and the way up is a Markdown parser, which is a dependency no set this has
+# met needs.
+"""
+
+_DEFINED = re.compile(r"^ {0,3}\[[^\]\n]+\]:[ \t]*(?P<target>\S+)", re.MULTILINE)
+"""A Markdown link definition: a label at the start of a line, then the address it stands for.
+
+Recognised and never rewritten. A definition is written in one place and used from another,
+while the substitution here only ever edits an address where it stands, so repointing one is
+work of a different shape. Recognising it costs one expression and is not the same promise:
+a file this run moved away from under a definition is a file left broken, and a broken file
+the caller is told about is a different thing from a broken file nobody mentions.
+"""
+
+
+def _addresses_a_file(token: str, *, moved: bool) -> bool:
+    """The one rule for what counts as an address of a file beside the one it was written in.
+
+    One rule in one place, because it is one question and both halves of the work read the
+    same answer: what may be rewritten is what may be reported. Split in two -- a syntactic
+    test before the rewrite and a second, looser test before the report -- it would call a
+    token an address for one purpose and not for the other, which is how a run comes to
+    repoint something it never says a word about, or to say a word about something it would
+    never have repointed.
+
+    A token is an address when it is written as a relative path -- not a URL, not an anchor
+    within the same file, not an absolute path, not a home-relative one, not an autolink --
+    and then either has a step in it or names a file this run actually moved. The second
+    half is what lets a sibling addressed by its bare name be repointed when the two move
+    apart; without it, the first half alone would have to treat every backticked word as an
+    address, and `pro`, `model_decision` and `uv run pytest` would each earn a report row
+    saying they lead out of the set. The price is the other way round: a bare name that
+    leads out of the set stays silent, because nothing distinguishes it from a word.
+    """
+    if token.startswith(("/", "#", "<", "~")) or "://" in token or token.startswith("mailto:"):
+        return False
+    return moved or "/" in token.partition("#")[0]
+
+
+def _placed(parts: Sequence[_Part]) -> dict[Path, Path]:
+    """Where every path of the plan ends up, by the path it was read from.
+
+    The whole plan and not one entity of it: a subagent addresses a rule file, and which of
+    the two is asked about first is an order of the composition rather than a fact about
+    either. An entity with no part here was moved nowhere, and an address of it is left alone.
+    """
+    return {
+        Path(os.path.normpath(part.copied_from)): part.staged
+        for part in parts
+        if part.copied_from is not None
+    }
+
+
+def _repointed(candidate: Path, placed: Mapping[Path, Path]) -> Path | None:
+    """Where ``candidate`` lands, whether it moves itself or inside a directory that moves.
+
+    A bundled directory crosses as one part, so a file inside it has no entry of its own and
+    is found by the nearest ancestor that has one; the steps below that ancestor are the same
+    on both sides, because the directory is copied whole.
+    """
+    for level in [candidate, *candidate.parents]:
+        moved = placed.get(level)
+        if moved is not None:
+            return moved / candidate.relative_to(level)
+    return None
+
+
+def _named_paths(inputs: Inputs) -> list[Path]:
+    """Every path the composition names, in the order :data:`assets.PARTS` lists the parts.
+
+    A part may be absent -- ``plugin`` as ``None``, a folder tuple as an empty one -- and an
+    absent part names no path. Every part that is there is a path or a tuple of them, which
+    is the whole of what a composition can hold.
+    """
+    named: list[Path] = []
+    for part in PARTS:
+        value = getattr(inputs, part)
+        if value is None:
+            continue
+        named += [value] if isinstance(value, Path) else list(value)
+    return named
+
+
+OUT_OF_THE_SET = (
+    "leads out of the set: the composition names no part holding what it points at, so this "
+    "run moved no such file and has no new place to point it at. It crosses exactly as it "
+    "was written -- follow it by hand once you know where the file it means ended up"
+)
+"""Why an address this run did not rewrite is named rather than left in silence.
+
+An address inside the set that stayed where it was is a different case and says nothing: the
+file is still at the path it was at, and the rule is to rewrite what moved and nothing else.
+An address of something the set never held cannot be checked by anyone but the caller.
+"""
+
+STILL_POINTS_AT_THE_OLD_PLACE = (
+    "in a Markdown link definition, and this run moved what it points at without repointing "
+    "it: a definition stands in one place and is used from another, and the substitution "
+    "here only ever edits an address where it stands. The file is broken as it crosses, "
+    "which is why it is named here rather than left to be found -- point it at "
+)
+"""Why an address this run broke is named. The place to point it at is appended to this.
+
+The one row of this whole module about damage rather than about a price: every other line
+says a file crossed unchanged, and this one says a file crossed changed underneath. Silence
+here would be the exact failure the command exists against, with the command as its author.
+"""
+
+
+def _settled(
+    token: str,
+    source_dir: Path,
+    staged_dir: Path,
+    placed: Mapping[Path, Path],
+    named: Sequence[Path],
+) -> tuple[str | None, str | None]:
+    """What becomes of one address: the new one, a reason to report, or neither of the two.
+
+    Three answers, and one question asked of each address by resolving it against the folder
+    the file was read from. It names something the plan moves: the new address is the way
+    from where this file lands to where that one lands, and one that comes out the same --
+    two parts that move together -- is neither a rewrite nor a row. It names something inside
+    the set that the plan does not move: neither, because the file is still where the address
+    says it is. It names nothing the composition holds: a row, because nobody here can work
+    out what it should have become.
+
+    Both spellings of an address are settled here and not each in its own way, so that what
+    is decided about ``../policy/tone.md`` does not depend on whether it was written inline
+    or as a definition. What differs between them is only what the caller does with the first
+    answer: an inline address is rewritten with it, a definition is named with it.
+    """
+    # An anchor names a place inside the file and travels with it untouched; what moves is
+    # the path in front of it.
+    target, _, anchor = token.partition("#")
+    candidate = Path(os.path.normpath(source_dir / target))
+    landed = _repointed(candidate, placed)
+    if not _addresses_a_file(token, moved=landed is not None):
+        return None, None
+    if landed is None:
+        inside = any(candidate == root or candidate.is_relative_to(root) for root in named)
+        return None, None if inside else f"addresses `{token}`, which {OUT_OF_THE_SET}"
+    became = Path(os.path.relpath(landed, staged_dir)).as_posix() + (f"#{anchor}" if anchor else "")
+    return (None if became == token else became), None
+
+
+def _relink(
+    text: str,
+    source_dir: Path,
+    staged_dir: Path,
+    placed: Mapping[Path, Path],
+    named: Sequence[Path],
+) -> tuple[str, list[tuple[str, str]], list[str]]:
+    """``text`` with every address of a moved file pointed at where this run put it.
+
+    Two passes over the same text and one decision behind both (`_settled`). An address
+    written where it stands is rewritten; a link definition is named instead, with the place
+    it should point at, because this run moves the file out from under it either way and only
+    one of the two can be fixed here.
+    """
+    rewrites: list[tuple[str, str]] = []
+    said: list[str] = []
+
+    def pointed(match: re.Match[str]) -> str:
+        group = "link" if match.group("link") is not None else "code"
+        token = match.group(group)
+        became, reason = _settled(token, source_dir, staged_dir, placed, named)
+        if reason is not None:
+            said.append(reason)
+        if became is None:
+            return match.group()
+        rewrites.append((token, became))
+        whole, start = match.group(), match.start()
+        return whole[: match.start(group) - start] + became + whole[match.end(group) - start :]
+
+    changed = _ADDRESSED.sub(pointed, text)
+    for found in _DEFINED.finditer(text):
+        token = found.group("target")
+        became, reason = _settled(token, source_dir, staged_dir, placed, named)
+        if became is not None:
+            said.append(f"addresses `{token}` {STILL_POINTS_AT_THE_OLD_PLACE}`{became}`")
+        elif reason is not None:
+            said.append(reason)
+    return changed, rewrites, said
+
+
+def _relinked(
+    parts: Sequence[_Part], inputs: Inputs
+) -> tuple[list[_Part], list[dict[str, str]], list[str]]:
+    """The plan with every address in it pointed at where this run put the file it names.
+
+    Only the files the translation rules name (:meth:`rules.Rules.rewritable`) are opened at
+    all: a change history is a record of what was written, and a run that edited one would
+    make it a record of what we wish had been written. Which files those are is data in the
+    rules file, so no name of any particular set is spelled here.
+
+    The text edited is what the plan was already going to write -- a header this run
+    translated, or the file as it was found -- never the caller's own file, which is not this
+    command's to touch under any circumstance.
+    """
+    placed = _placed(parts)
+    named = _named_paths(inputs)
+    settled: list[_Part] = []
+    pointed: list[dict[str, str]] = []
+    said: list[str] = []
+    for part in parts:
+        source = part.copied_from
+        # A directory crosses whole and a link crosses as a link: neither is a file this run
+        # holds the text of, and reading through either is the one thing `_assemble` is
+        # careful not to do.
+        if (
+            source is None
+            or source.is_dir()
+            or source.is_symlink()
+            or not inputs.translation.rewritable(part.label)
+        ):
+            settled.append(part)
+            continue
+        text = part.content if part.content is not None else _text_of(source)
+        changed, rewrites, reasons = _relink(text, source.parent, part.staged.parent, placed, named)
+        settled.append(part if not rewrites else replace(part, content=changed))
+        pointed += [
+            {"path": str(part.staged), "from": was, "to": became} for was, became in rewrites
+        ]
+        # The part names itself and the reason says the rest: which file a row is about is the
+        # one thing `_relink` cannot know, and the one thing a reader needs first.
+        said += [f"`{part.label}` {reason}" for reason in reasons]
+    return settled, pointed, said
+
+
 def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], list[str]]:
     """Copy or write every planned part, once the whole plan is known to be safe to write.
 
@@ -1612,6 +1851,7 @@ def _report(
     assessed: Sequence[Assessed],
     advice: Sequence[str],
     written: Sequence[dict[str, str]],
+    links: Sequence[dict[str, str]],
     error: str | None,
 ) -> dict[str, Any]:
     """The machine-readable report. ``report_schema`` first, and ``error`` says why it is thin.
@@ -1638,6 +1878,10 @@ def _report(
         "target": _environment(target),
         "rules_version": rules_version,
         "translations": [row for entry in assessed for row in entry.translations],
+        # Beside the translated values and for the same reason: a substitution the run made
+        # inside somebody's file is work done to it, and work a report does not show is work
+        # the caller cannot check. Empty without `out`, which is where addresses are settled.
+        "links": list(links),
         "assets": [
             {
                 "kind": entry.asset.kind.value,
@@ -1718,6 +1962,10 @@ def _summary(report: dict[str, Any]) -> str:
         for entry in report["translations"]
     ]
     lines += [
+        f"  pointed `{entry['from']}` at `{entry['to']}` in {entry['path']}"
+        for entry in report["links"]
+    ]
+    lines += [
         f"  wrote {entry['path']} (it belongs at {entry['to']})" for entry in report["written"]
     ]
     lines += [f"  advice: {line}" for line in report["advice"]]
@@ -1755,17 +2003,8 @@ def _nothing_there(inputs: Inputs) -> list[str]:
     skill file, which is the same false blame in a narrower door. What is wrong is the link,
     and what a person has to go and look at is what it points at, so the refusal says both.
     """
-    named: list[Path] = []
-    for part in PARTS:
-        # A part may be absent -- `plugin` as `None`, a folder tuple as an empty one -- and an
-        # absent part is not a path that is missing. Every part that is there is a path or a
-        # tuple of them, which is the whole of what the composition can hold.
-        value = getattr(inputs, part)
-        if value is None:
-            continue
-        named += [value] if isinstance(value, Path) else list(value)
     absent = []
-    for path in named:
+    for path in _named_paths(inputs):
         # The link first, because `exists()` follows one and answers `False` for both cases:
         # asked the other way round, a link leading nowhere reads as a path with nothing at
         # it, and the report would name a folder the person can see is there.
@@ -1902,6 +2141,7 @@ def convert(
     assessed: list[Assessed] = []
     advice: list[str] = []
     written: list[dict[str, str]] = []
+    links: list[dict[str, str]] = []
     # Until the assembly table has judged something there is no verdict to keep, and
     # "we could not read enough to say" is what `undecidable` means. Once it has, that
     # verdict stands even if the run then fails to write: being unable to put the files
@@ -1947,6 +2187,11 @@ def convert(
             # One plan for the whole set, checked whole before the first byte: two skills of
             # one set aimed at one destination is the same collision as two parts of one
             # skill, and a check made per entity would not see it.
+            # After the whole plan and before the first byte of it: an address is rewritten
+            # against where the file it names lands, and that is not known until every entity
+            # has contributed its parts.
+            parts, links, addressed = _relinked(parts, inputs)
+            advice += addressed
             written, linked = _assemble(out_dir, parts)
             advice += linked
     except (ConvertError, ReadError, OSError) as error:
@@ -1982,6 +2227,7 @@ def convert(
             assessed,
             advice,
             written,
+            links,
             str(stopped),
         )
         return Conversion(verdict, stopped.exit_code, report, _summary(report))
@@ -1994,6 +2240,7 @@ def convert(
         assessed,
         advice,
         written,
+        links,
         None,
     )
     return Conversion(verdict, EXIT_CODE[verdict], report, _summary(report))
