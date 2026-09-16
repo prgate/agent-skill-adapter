@@ -63,6 +63,37 @@ sources:
     checked_at: 2026-09-16
     environment_version: "2.0"
     retrieved_from: shipped
+  # The same install, its plugins guide. The public page documents the manifest as a file
+  # and names not one field of it; this section names both fields it carries. A transfer
+  # that rewrites somebody's manifest has to know which fields the format has, and reading
+  # that off the public page's silence would be a guess (D02).
+  - id: plugins-shipped-manifest
+    url: "~/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/plugins.md"
+    anchor: "Manifest (`plugin.json`)"
+    sha256: "9573a22caa3664ca16fe83c4dee829c854fd0ef55bcc252c556babf46e2d5763"
+    checked_at: 2026-09-16
+    environment_version: "2.0"
+    retrieved_from: shipped
+  # The same document, the tree it opens with. It is the one statement of what a plugin
+  # folder holds, and so of where the parts of a plugin go: the manifest names none of
+  # them, because the environment finds them by this structure and not by a field.
+  - id: plugins-shipped-structure
+    url: "~/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/plugins.md"
+    anchor: "Directory Structure"
+    sha256: "6551db32aaa5abc0e9b877b7aacdf7bac23821b8b4f54381274b8ff380eda2b5"
+    checked_at: 2026-09-16
+    environment_version: "2.0"
+    retrieved_from: shipped
+  # The same document again, on switching a plugin off. It is where `disabled` is documented
+  # -- the manifest section names only `name` -- and the one place either side of this
+  # environment's documentation says which of a plugin's two names identifies it.
+  - id: plugins-shipped-switch
+    url: "~/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/plugins.md"
+    anchor: "Turning Plugins On and Off"
+    sha256: "d7c50ac23b1e7c94923dfb8c95447a018b0952f26a2efc5d6d552c528391ea52"
+    checked_at: 2026-09-17
+    environment_version: "2.0"
+    retrieved_from: shipped
   - id: subagents-frontmatter
     url: https://antigravity.google/docs/subagents
     markdown_url: https://antigravity.google/docs/subagents.md
@@ -670,6 +701,30 @@ capabilities:
     support: supported
     source_id: plugins-manifest
     note: "`plugin.json` at the plugin root; the `name` field defaults to the directory name."
+  # The whole of the format, field by field, because a manifest is rewritten field by field
+  # and a field this list does not carry has nowhere in the target to go. The public page
+  # names the file and no field of it; the shipped guide names these two and no others, so
+  # anything else a manifest carries -- a description, a version, a list of the skills it
+  # holds -- is not "unknown" here for want of looking, it is absent from the format.
+  - id: settings.file.plugin-manifest.name
+    kind: settings-file
+    support: supported
+    source_id: plugins-shipped-manifest
+    note: >-
+      "**`name`** (string, optional): The display name of the plugin. If omitted, it
+      defaults to the directory name."
+  # Documented by the section on switching a plugin off and not by the manifest section,
+  # which names `name` and nothing else. The same sentences settle which of a plugin's two
+  # names identifies it, and so what the folder a transfer writes has to be called.
+  - id: settings.file.plugin-manifest.disabled
+    kind: settings-file
+    support: supported
+    source_id: plugins-shipped-switch
+    note: >-
+      Boolean, optional: "a plugin can ship switched off by declaring `"disabled": true` in
+      its `plugin.json`". Overridden by `config.json`, which records whether a plugin is
+      active "under a `plugins` map keyed by the plugin's **directory** name" -- so the
+      folder identifies a plugin, while `name` is the display name that defaults to it.
   - id: settings.file.mcp-workspace
     kind: settings-file
     support: supported
@@ -801,6 +856,35 @@ layout:
   - id: plugins.user
     path: "~/.gemini/config/plugins/"
     source_id: plugins-locations
+  # What one plugin folder holds, measured from the two roots above the way `skill.file` is
+  # measured from `skills.*`. These are how the environment finds a plugin's parts -- the
+  # manifest lists none of them -- so a set that crosses as a plugin is laid out by these
+  # and not by the root of each kind. `<plugin-name>` is the folder name; that the folder
+  # is what identifies a plugin is `settings.file.plugin-manifest.disabled`, which carries
+  # the source saying so.
+  - id: plugin.file
+    path: "<plugin-name>/plugin.json"
+    source_id: plugins-shipped-structure
+  - id: plugin.dir.skills
+    path: "<plugin-name>/skills/"
+    source_id: plugins-shipped-structure
+  - id: plugin.dir.rules
+    path: "<plugin-name>/rules/"
+    source_id: plugins-shipped-structure
+  # Not in the tree the plugins guide draws; the subagents page names it, and it is the one
+  # of these four whose source is a public page rather than the shipped guide.
+  - id: plugin.dir.agents
+    path: "<plugin-name>/agents/"
+    source_id: subagents-location
+  # The two files the tree draws beside the manifest. They are `plugin.file.*` and not
+  # `plugin.dir.*` because what a transfer does with them differs: a folder of entities is
+  # walked and its entities carried, while these two are files of the plugin itself.
+  - id: plugin.file.hooks
+    path: "<plugin-name>/hooks.json"
+    source_id: plugins-shipped-structure
+  - id: plugin.file.mcp-config
+    path: "<plugin-name>/mcp_config.json"
+    source_id: plugins-shipped-structure
   - id: mcp.project
     path: ".agents/mcp_config.json"
     source_id: mcp-cli-configs

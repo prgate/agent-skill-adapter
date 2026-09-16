@@ -29,7 +29,7 @@ import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agent_skill_adapter.assets import (
@@ -41,6 +41,7 @@ from agent_skill_adapter.assets import (
     HOOKS_KEY,
     LINKED,
     PARTS,
+    PLUGIN_MANIFEST,
     RULES_FILE,
     SKILL_DIR,
     SKILL_FRONTMATTER,
@@ -255,6 +256,28 @@ ROOT_ENTRY = {
 }
 """Where an entity of each kind lives in an environment, by the level it is installed at."""
 
+PLUGINS_ROOT = {Scope.PROJECT: "plugins.project", Scope.USER: "plugins.user"}
+PLUGIN_INSIDE = {
+    Kind.SKILL: "plugin.dir.skills",
+    Kind.SUBAGENT: "plugin.dir.agents",
+    Kind.RULES: "plugin.dir.rules",
+}
+PLUGIN_FILE = "plugin.file"
+PLUGIN_BESIDE = "plugin.file."
+"""Where the parts of a set that crosses as a plugin go, in place of the roots above.
+
+A composition that names a manifest is a plugin, and a plugin of the target holds its own
+skills, rules and subagents inside its folder: the environment finds them by that structure
+and the manifest lists none of them (D02). So the roots move inside the plugin, kind for
+kind, and the same `ROOT_ENTRY` table says which kinds have a place at all.
+
+`PLUGIN_BESIDE` is the prefix of the other files a plugin folder holds -- its own hooks and
+its own MCP configuration. They are read off the layout rather than named here, so a file
+the target documents tomorrow is accounted for without an edit to this module, exactly as
+an undocumented frontmatter key is. `PLUGIN_FILE` is not one of them: it has no trailing
+dot, and it is the manifest itself.
+"""
+
 SKILLS_ROOT = ROOT_ENTRY[Kind.SKILL]
 HOOKS_FILE = {Scope.PROJECT: "hooks.project", Scope.USER: "hooks.user"}
 SKILL_FILE = "skill.file"
@@ -266,6 +289,7 @@ environment kept out of the freshness check that guards every other such claim.
 """
 
 SKILL_NAME = "<skill-name>"
+PLUGIN_NAME = "<plugin-name>"
 WORKSPACE_ROOT = "<workspace-root>"
 HOME = "~"
 """What a layout path may carry in place of a name or a root, expanded by the assembly."""
@@ -765,9 +789,161 @@ def _trigger(
     ]
 
 
+MANIFEST_FIELD = f"{PLUGIN_MANIFEST}."
+"""The prefix under which one field of a plugin manifest is asked about.
+
+Spelled from the id of the manifest itself, the way `skill.frontmatter.<key>` is spelled
+from a skill's: a manifest is judged field by field, and every field is a question put to
+the descriptions rather than a name this command keeps a list of.
+"""
+
+
+def _manifest_fields(path: Path) -> dict[str, Any]:
+    """The manifest read as data: a mapping of fields, or a refusal naming the file.
+
+    Somebody else's file and a trust boundary: one that will not parse is a path the caller
+    can go and look at, which a traceback naming this module is not.
+
+    # ponytail: top-level fields only, which is every field the specification names (9).
+    # A nested one earns its row when a description declares a nested id to ask under.
+    """
+    try:
+        data = json.loads(_text_of(path))
+    except ValueError as error:
+        raise ConvertError(
+            f"{path}: could not be read as a manifest ({error})", UNREADABLE
+        ) from error
+    if not isinstance(data, dict):
+        raise ConvertError(
+            f"{path}: a manifest is a mapping of fields, and this names none", UNREADABLE
+        )
+    fields: dict[str, Any] = data
+    return fields
+
+
+def _manifest(
+    asset: Asset,
+    gaps: Mapping[str, Gap],
+    target: EnvSpec,
+    translation: Rules,
+    scope: Scope,
+    plugin: str | None,
+) -> tuple[list[Property], list[str]]:
+    """Every field of a plugin manifest as a row, and one row for the rewrite left undone.
+
+    The fields are asked of the two descriptions exactly as a skill's header keys are, so a
+    field the target's own format has no place for is a row and never a silent omission
+    (FR-32), and a field nobody documented is `unknown` rather than something invented here.
+    """
+    findings = [
+        Finding(f"manifest field `{key}`", (f"{MANIFEST_FIELD}{key}",))
+        for key in _manifest_fields(asset.path)
+    ]
+    rows, advice = _judge(findings, gaps, target, translation, asset.kind, scope)
+    return [*rows, *_beside_a_manifest(asset, target, plugin)], advice
+
+
+CARRIED_BY_HAND = (
+    "is a file of the plugin itself, which the target reads from the plugin folder rather "
+    "than from anything the manifest lists -- and no part of a composition names one, so "
+    "this run carries it nowhere and leaves it where it is. Copy it into the plugin folder "
+    "this run wrote, beside the manifest, having read it first: a hooks file and an MCP "
+    "configuration name commands that will then run, and what those do on the machine this "
+    "set came from is not something two documents about file formats can weigh"
+)
+"""Why a file found beside a manifest earns a row and never a copy.
+
+Named because it is there and does not cross (FR-32, FR-3): the set holds a working part of
+a plugin that the transfer does not carry, and a run silent about it would leave a person to
+find out by the plugin behaving differently. Not carried, because what it holds is commands
+to run, and this command reads no command it did not write.
+"""
+
+
+def _beside_a_manifest(asset: Asset, target: EnvSpec, plugin: str | None) -> list[Property]:
+    """The plugin's own files sitting beside its manifest: one row each, and no bytes moved.
+
+    Which files those are is the target's layout to say -- every entry under
+    :data:`PLUGIN_BESIDE` -- so this asks about the names that description carries and keeps
+    none of its own. A name the target documents and the set does not hold earns nothing:
+    there is no file to account for, and a row about one would be an invention.
+    """
+    rows = []
+    for entry in sorted(target.layout, key=lambda item: item.id):
+        if not entry.id.startswith(PLUGIN_BESIDE):
+            continue
+        name = PurePosixPath(entry.path).name
+        if not (Path(os.path.abspath(asset.path)).parent / name).is_file():
+            continue
+        outcome = Outcome.UNKNOWN
+        rows.append(
+            Property(
+                id=entry.id,
+                found_as=f"`{name}` beside the manifest",
+                outcome=outcome,
+                origin=Origin.EXTENSION,
+                verdict=verdict_of(outcome, Origin.EXTENSION),
+                source_says=None,
+                target_says=entry.path
+                if plugin is None
+                else entry.path.replace(PLUGIN_NAME, plugin),
+                note=CARRIED_BY_HAND,
+            )
+        )
+    return rows
+
+
+def _rewritten(asset: Asset, properties: Sequence[Property]) -> str:
+    """The manifest in the target's format: the fields it documents, and not one besides.
+
+    Which those are is read off the rows the fields already earned -- a field the target
+    documents came back `reproduced`, and one it has no place for came back `unknown` and
+    is dropped, having said so in a row of its own. So the format of the target's manifest
+    is never a list of names kept here: it is whatever its description declares, and a
+    field the vendor adds tomorrow crosses as soon as the description carries it.
+
+    Asked of the outcome and not of the verdict, though the verdict is what the rest of the
+    run adds up: `out-of-scope` is `clean` too, and it means the field cost the transfer
+    nothing precisely because it is not carried. Read off the verdict, such a field would be
+    written into the manifest by the same run whose row for it says it was left out.
+    """
+    documented = {
+        entry.id for entry in properties if entry.id and entry.outcome is Outcome.REPRODUCED
+    }
+    fields = {
+        key: value
+        for key, value in _manifest_fields(asset.path).items()
+        if f"{MANIFEST_FIELD}{key}" in documented
+    }
+    return json.dumps(fields, indent=2, ensure_ascii=False) + "\n"
+
+
 def _layout(spec: EnvSpec, entry_id: str) -> str | None:
     """The path the description gives ``entry_id``, or ``None`` when it names none."""
     return next((entry.path for entry in spec.layout if entry.id == entry_id), None)
+
+
+def _inside_a_plugin(target: EnvSpec, scope: Scope, entry_id: str, plugin: str) -> str | None:
+    """One path inside a plugin folder, measured from the root the target puts plugins in.
+
+    Two layout entries joined and neither spelled: where the target keeps its plugins, and
+    what it says one plugin folder holds. ``None`` where the target names either of them
+    nowhere, which is the same answer every other missing place gets.
+    """
+    root = _layout(target, PLUGINS_ROOT[scope])
+    inside = _layout(target, entry_id)
+    if root is None or inside is None:
+        return None
+    return f"{root.rstrip('/')}/{inside}".replace(PLUGIN_NAME, plugin)
+
+
+def _root_of(target: EnvSpec, kind: Kind, scope: Scope, plugin: str | None) -> str | None:
+    """Where an entity of ``kind`` goes: the root of its own kind, or one inside a plugin."""
+    if plugin is None:
+        entry = ROOT_ENTRY.get(kind)
+        return None if entry is None else _layout(target, entry[scope])
+    inside = PLUGIN_INSIDE.get(kind)
+    return None if inside is None else _inside_a_plugin(target, scope, inside, plugin)
 
 
 # A skill's own name, not documented by either environment description -- both merely say a
@@ -1092,6 +1268,7 @@ def _plan(
     target: EnvSpec,
     scope: Scope,
     translation: Rules,
+    plugin: str | None,
 ) -> tuple[list[_Part], list[str]]:
     """What one entity of the set contributes to the plan, and what it asks of a person.
 
@@ -1107,7 +1284,9 @@ def _plan(
         return _undocumented(entity, where_, translation)
     if entity.assembled_name is None:
         return [], []
-    root = _layout(target, ROOT_ENTRY[asset.kind][scope])
+    if asset.kind is Kind.MANIFEST:
+        return _plan_manifest(entity, where_, target, scope, entity.assembled_name)
+    root = _root_of(target, asset.kind, scope, plugin)
     if root is None:
         # Unreachable: `_nowhere` asked the same question while the entity was judged, and
         # an entity with no root to go to was left without an assembled name. Answered and
@@ -1135,6 +1314,36 @@ def _plan(
             under,
             copied_from=asset.path,
             content=None if rewrite is None else rewrite(asset.path, entity.translations),
+        )
+    ], []
+
+
+def _plan_manifest(
+    entity: Assessed, where_: _Where, target: EnvSpec, scope: Scope, plugin: str
+) -> tuple[list[_Part], list[str]]:
+    """The rewritten manifest, at the place the target gives a plugin's own manifest.
+
+    The plugin folder is what the environment reads a plugin by, and everything else of the
+    set is written inside it, so this is the file that makes the folder a plugin at all.
+    Its place is two layout entries like every other, and `_assess` asked for both before
+    the entity was given a name to be assembled under.
+    """
+    root = _layout(target, PLUGINS_ROOT[scope])
+    inside = _layout(target, PLUGIN_FILE)
+    if root is None or inside is None:
+        # Unreachable for the same reason `_plan`'s own is: `_nowhere` asked these two
+        # questions while the manifest was judged and left it unnamed if either went
+        # unanswered. Answered rather than asserted, the answer being the right one anyway.
+        return [], []
+    where, staged, under = where_.place(root, inside.replace(PLUGIN_NAME, plugin), plugin)
+    return [
+        _Part(
+            entity.asset.path.name,
+            where,
+            staged,
+            under,
+            copied_from=entity.asset.path,
+            content=_rewritten(entity.asset, entity.properties),
         )
     ], []
 
@@ -2193,7 +2402,7 @@ def _hooks_of(asset: Asset) -> Mapping[str, Any]:
     return declared if isinstance(declared, Mapping) else {}
 
 
-def _nowhere(target: EnvSpec, kind: Kind, scope: Scope) -> list[str]:
+def _nowhere(target: EnvSpec, kind: Kind, scope: Scope, plugin: str | None) -> list[str]:
     """The line an entity whose kind the target names no root for earns, in the report's words.
 
     The same price `_left_behind` names for one part of a skill, for a whole entity of
@@ -2202,13 +2411,20 @@ def _nowhere(target: EnvSpec, kind: Kind, scope: Scope) -> list[str]:
     refusal, because the rest of the set is unaffected and stopping the run over it would
     lose every entity that did have somewhere to go.
     """
-    entry = ROOT_ENTRY.get(kind)
-    if entry is None:
+    if kind is Kind.MANIFEST:
+        # The one kind whose place is not a root of entities: a manifest is the marker that
+        # makes a folder a plugin, so it is asked for the plugins root and for its own name
+        # inside it -- the same two answers a skill needs, about a different pair of entries.
+        wanted = [_layout(target, PLUGINS_ROOT[scope]), _layout(target, PLUGIN_FILE)]
+    elif kind not in (PLUGIN_INSIDE if plugin is not None else ROOT_ENTRY):
         return []
-    # A skill is a folder and needs two answers: the root its folder sits in, and what the
-    # file inside it is called. Every other kind crosses as one file and needs only the root.
-    wanted = [entry[scope], SKILL_FILE] if kind is Kind.SKILL else [entry[scope]]
-    if all(_layout(target, item) is not None for item in wanted):
+    elif kind is Kind.SKILL:
+        # A skill is a folder and needs two answers: the root its folder sits in, and what
+        # the file inside it is called. Every other kind crosses as one file and needs one.
+        wanted = [_root_of(target, kind, scope, plugin), _layout(target, SKILL_FILE)]
+    else:
+        wanted = [_root_of(target, kind, scope, plugin)]
+    if all(item is not None for item in wanted):
         return []
     return [
         f"the {kind.value} stayed where it is: {target.vendor}/{target.environment} names no "
@@ -2223,6 +2439,7 @@ def _assess(
     target: EnvSpec,
     translation: Rules,
     scope: Scope,
+    plugin: str | None,
 ) -> tuple[Assessed, list[str]]:
     """One entity of the set: its rows, its own verdict, and the lines it owes the reader.
 
@@ -2249,6 +2466,12 @@ def _assess(
         headed, added = _trigger(asset, target, translation)
         properties += headed
         applied += added
+    if asset.kind is Kind.MANIFEST and asset.name:
+        # The other file the reading carried whole: a manifest is data rather than a header,
+        # and what it holds is asked here, where the two descriptions are at hand.
+        fields, said = _manifest(asset, gaps, target, translation, scope, plugin)
+        properties += fields
+        advice += said
     stayed: list[str] = []
     name, assembled = asset.name, None
     if not asset.name:
@@ -2258,12 +2481,19 @@ def _assess(
         # The whole skill having nowhere to go, and one part of it left behind, are asked in
         # that order and never both: a target that names no root has nothing to say about
         # where the parts inside it would have gone either.
-        stayed = _nowhere(target, asset.kind, scope)
+        stayed = _nowhere(target, asset.kind, scope, plugin)
         if not stayed:
             assembled = _assembled_name(name, target.environment)
             stayed = _left_behind(target, scope, properties, _hooks_of(asset))
+    elif asset.kind is Kind.MANIFEST:
+        stayed = _nowhere(target, asset.kind, scope, plugin)
+        # The folder the manifest sits in, which is what the target reads a plugin by: its
+        # own `config.json` keys a plugin on the directory name, and the `name` field of the
+        # manifest is a display name that defaults to it. Unsuffixed, unlike a skill: a
+        # plugin is a namespace of its own and two of them never share a folder.
+        assembled = None if stayed else plugin
     elif asset.kind in ROOT_ENTRY:
-        stayed = _nowhere(target, asset.kind, scope)
+        stayed = _nowhere(target, asset.kind, scope, plugin)
         # The name on disk, and not one suffixed with the target environment: a skill is a
         # folder of its own and two targets would collide on it, while one file among many
         # in a shared folder is found by the name its own header and its callers use.
@@ -2357,8 +2587,24 @@ def convert(
                 UNREADABLE,
             )
         found = read(inputs)
+        # A composition that names a manifest crosses as a plugin, and every root moves
+        # inside its folder. Asked once, of the whole set, because it is a fact about the
+        # set and not about any one entity of it -- the skills of a plugin go inside it
+        # whether or not the manifest is the entity being judged at the time.
+        # Made absolute before the folder is named: `Path("plugin.json").parent` is `.`,
+        # whose name is the empty string, and a plugin folder called that is every part of
+        # the set written one level above where it belongs. The command line expands its
+        # arguments, the seam takes whatever a caller passes, and this is the seam.
+        plugin = next(
+            (
+                Path(os.path.abspath(asset.path)).parent.name
+                for asset in found
+                if asset.kind is Kind.MANIFEST
+            ),
+            None,
+        )
         for asset in found:
-            entity, said = _assess(asset, gaps, target_spec, inputs.translation, scope)
+            entity, said = _assess(asset, gaps, target_spec, inputs.translation, scope, plugin)
             assessed.append(entity)
             advice += said
         verdict = worst(entity.verdict for entity in assessed)
@@ -2374,7 +2620,9 @@ def convert(
             where = _Where(None if out is None else Path(os.path.normpath(out)))
             parts: list[_Part] = []
             for entity in assessed:
-                planned, asked = _plan(entity, where, target_spec, scope, inputs.translation)
+                planned, asked = _plan(
+                    entity, where, target_spec, scope, inputs.translation, plugin
+                )
                 parts += planned
                 advice += asked
             # One plan for the whole set, checked whole before the first byte: two skills of

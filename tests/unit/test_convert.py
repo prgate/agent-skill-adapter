@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -3091,3 +3092,299 @@ def test_install_at_the_user_level_writes_under_the_home_folder(
     )
 
     assert (home / ".gemini/config/agents/note-keeper.md").exists()
+
+
+def manifest_tree(tmp_path: Path) -> Path:
+    """Descriptions where the target documents a plugin manifest and one field of one.
+
+    One field declared and the rest not: a manifest is judged field by field against the
+    descriptions, so a run that read a list of fields out of this command instead would
+    answer the same for both of them.
+    """
+    root = tmp_path / "specs"
+    write(
+        root,
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+        ],
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+            {
+                "id": "settings.file.plugin-manifest",
+                "kind": "settings-file",
+                "support": "supported",
+            },
+            {
+                "id": "settings.file.plugin-manifest.name",
+                "kind": "settings-file",
+                "support": "supported",
+            },
+        ],
+        layout=[
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "plugins.project", "path": "<workspace-root>/.agents/plugins/"},
+            {"id": "plugin.file", "path": "<plugin-name>/plugin.json"},
+            {"id": "plugin.dir.skills", "path": "<plugin-name>/skills/"},
+            {"id": "plugin.file.hooks", "path": "<plugin-name>/hooks.json"},
+            {"id": "plugin.file.mcp-config", "path": "<plugin-name>/mcp_config.json"},
+        ],
+    )
+    return root
+
+
+def a_manifest(tmp_path: Path, text: str, *, skills: bool = False) -> Inputs:
+    """A composition naming a manifest, in a folder of its own -- which names the plugin."""
+    folder = tmp_path / "note-kit"
+    folder.mkdir(parents=True, exist_ok=True)
+    plugin = folder / "plugin.json"
+    plugin.write_text(text, encoding="utf-8")
+    if not skills:
+        return Inputs(translation=TRANSLATION, plugin=plugin)
+    skill(folder / "skills" / "taker", "name: taker\n")
+    return Inputs(translation=TRANSLATION, plugin=plugin, skills=(folder / "skills",))
+
+
+def test_every_field_of_a_manifest_is_a_row_and_the_descriptions_decide_which(
+    tmp_path: Path,
+) -> None:
+    """A manifest is read as data, and each of its fields is asked about under its own id.
+
+    `version` is a field of the set's own manifest that the target's format has no place
+    for, and the row saying so is the whole of FR-32 that is not silence. It is `unknown`
+    rather than `missing` because the target never said it rejects one -- and it is a row
+    at all only because the fields are asked of the descriptions one by one instead of
+    being matched against a list of names written down in this command.
+    """
+    root = manifest_tree(tmp_path)
+
+    result = convert_set(
+        a_manifest(tmp_path, json.dumps({"name": "kit", "version": "1.4.0"})),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+    found = properties(result.report)
+
+    assert found["settings.file.plugin-manifest.name"] == ("reproduced", "extension", "clean")
+    assert found["settings.file.plugin-manifest.version"] == ("unknown", "extension", "lossy")
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+
+
+def test_the_manifest_crosses_carrying_only_the_fields_the_target_documents(
+    tmp_path: Path,
+) -> None:
+    """The rewrite, and the one thing it must never do: invent a field or carry one blindly.
+
+    The target's own manifest format carries `name` and nothing else this manifest holds,
+    so `name` crosses and `version` does not -- and `version` is not dropped in silence, it
+    is the `unknown` row above. Which fields cross is read off those rows, so the format is
+    the description's to state and never a list of names kept in the command.
+    """
+    root = manifest_tree(tmp_path)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        a_manifest(tmp_path, json.dumps({"name": "kit", "version": "1.4.0"})),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    written = out / ".agents/plugins/note-kit/plugin.json"
+
+    assert json.loads(written.read_text(encoding="utf-8")) == {"name": "kit"}
+    assert {
+        "from": "plugin.json",
+        "to": ".agents/plugins/note-kit/plugin.json",
+        "path": str(written),
+    } in result.report["written"]
+
+
+def test_a_set_that_names_a_manifest_is_laid_out_inside_the_plugin_folder(
+    tmp_path: Path,
+) -> None:
+    """The environment finds a plugin's skills by its folder, so the skills go in it.
+
+    Without this the run would write a plugin folder holding a manifest and nothing else,
+    and the skills beside it in the root of their own kind -- an empty plugin, and the
+    parts of it loaded twice over or not as part of it at all.
+    """
+    root = manifest_tree(tmp_path)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        a_manifest(tmp_path, json.dumps({"name": "kit"}), skills=True),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert (out / ".agents/plugins/note-kit/skills/taker-antigravity/SKILL.md").exists()
+    assert not (out / ".agents/skills").exists()
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_a_manifest_that_is_not_data_is_refused_with_the_file_named(tmp_path: Path) -> None:
+    """Somebody else's file, parsed here: a broken one is a refusal and never a traceback.
+
+    Named by the path, because a manifest that will not parse is the caller's file to go
+    and look at, and a stack trace names this module instead.
+    """
+    root = manifest_tree(tmp_path)
+    inputs = a_manifest(tmp_path, "name = kit\n")
+
+    result = convert_set(inputs, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert result.exit_code == 6
+    assert str(inputs.plugin) in (result.report["error"] or "")
+
+
+def test_a_field_the_transfer_leaves_out_is_not_written_into_the_manifest(
+    tmp_path: Path,
+) -> None:
+    """`out-of-scope` is clean, and clean is not the same as carried.
+
+    A field the *source* does not support is out of the transfer's scope: it cost nothing
+    precisely because nothing crosses. The target documenting a field of that name does not
+    put it back -- read off the verdict rather than the outcome, this run would write the
+    field into the manifest while its own row says it was left out of the comparison.
+    """
+    root = tmp_path / "specs"
+    write(
+        root,
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[
+            {
+                "id": "settings.file.plugin-manifest.legacy",
+                "kind": "settings-file",
+                "support": "unsupported",
+            }
+        ],
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {
+                "id": "settings.file.plugin-manifest.name",
+                "kind": "settings-file",
+                "support": "supported",
+            },
+            {
+                "id": "settings.file.plugin-manifest.legacy",
+                "kind": "settings-file",
+                "support": "supported",
+            },
+        ],
+        layout=[
+            {"id": "plugins.project", "path": "<workspace-root>/.agents/plugins/"},
+            {"id": "plugin.file", "path": "<plugin-name>/plugin.json"},
+        ],
+    )
+    out = tmp_path / "out"
+
+    result = convert_set(
+        a_manifest(tmp_path, json.dumps({"name": "kit", "legacy": True})),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    written = out / ".agents/plugins/note-kit/plugin.json"
+
+    assert properties(result.report)["settings.file.plugin-manifest.legacy"] == (
+        "out-of-scope",
+        "extension",
+        "clean",
+    )
+    assert json.loads(written.read_text(encoding="utf-8")) == {"name": "kit"}
+
+
+def test_the_plugin_folder_is_named_the_same_however_the_manifest_path_is_spelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The seam takes the path a caller passes, and a relative one names the same folder.
+
+    `Path("plugin.json").parent` is `.` and its name is the empty string, which would put
+    the plugin folder one level up -- every part of the set outside the plugin the run says
+    it wrote. The command line expands its arguments and so never sees this; the seam is
+    public, and a caller of it passes what they have.
+    """
+    root = manifest_tree(tmp_path)
+    inputs = a_manifest(tmp_path, json.dumps({"name": "kit"}))
+    monkeypatch.chdir(tmp_path / "note-kit")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        replace(inputs, plugin=Path("plugin.json")), SOURCE, TARGET, root=root, out=out
+    )
+
+    assert (out / ".agents/plugins/note-kit/plugin.json").exists()
+    assert result.exit_code == 0
+
+
+def test_a_plugins_own_files_beside_the_manifest_are_named_and_not_carried(
+    tmp_path: Path,
+) -> None:
+    """A working part of the plugin that this run does not carry, and must not pass over.
+
+    The target reads a plugin's hooks and its MCP servers from the plugin folder and the
+    manifest lists neither (D02), so nothing in the composition names them and nothing
+    carries them. A run silent about that hands over a plugin that behaves differently and
+    leaves the owner to find out from the behaviour -- which is the whole failure this
+    command exists to prevent, so the row costs the run its clean verdict.
+    """
+    root = manifest_tree(tmp_path)
+    inputs = a_manifest(tmp_path, json.dumps({"name": "kit"}))
+    beside = tmp_path / "note-kit"
+    (beside / "hooks.json").write_text("{}", encoding="utf-8")
+    (beside / "mcp_config.json").write_text("{}", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(inputs, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+    found = properties(result.report)
+
+    assert found["plugin.file.hooks"] == ("unknown", "extension", "lossy")
+    assert found["plugin.file.mcp-config"] == ("unknown", "extension", "lossy")
+    assert rows(result.report)["plugin.file.hooks"]["target_says"] == "note-kit/hooks.json"
+    assert [entry["to"] for entry in result.report["written"]] == [
+        ".agents/plugins/note-kit/plugin.json"
+    ]
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+
+
+def test_a_plugin_file_the_set_does_not_hold_earns_no_row(tmp_path: Path) -> None:
+    """The target documents both files; this set holds neither, so neither is mentioned.
+
+    A row about a file that is not there is an invention, and it would tell the owner of a
+    plugin without hooks that their hooks did not cross.
+    """
+    root = manifest_tree(tmp_path)
+
+    result = convert_set(
+        a_manifest(tmp_path, json.dumps({"name": "kit"})),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+
+    assert not [entry for entry in properties(result.report) if entry.startswith("plugin.file.")]
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
