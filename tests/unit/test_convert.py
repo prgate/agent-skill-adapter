@@ -2782,3 +2782,219 @@ def test_a_link_definition_of_a_moved_file_is_named_even_though_it_is_not_repoin
         for line in result.report["advice"]
         if "../policy/tone.md" in line and "../rules/tone.md" in line
     ]
+
+
+def translation_file(tmp_path: Path, translation: Rules) -> Path:
+    """The translation rules on disk, where `--translation` can name them."""
+    path = tmp_path / "translation.yaml"
+    path.write_text(
+        yaml.safe_dump(translation.model_dump(mode="json", by_alias=True)), encoding="utf-8"
+    )
+    return path
+
+
+def a_set_on_disk(tmp_path: Path) -> dict[str, Path]:
+    """A set laid out under names of its owner's own choosing, one part of every kind."""
+    home = tmp_path / "set"
+    skill(home / "bundles" / "note-taker", "name: note-taker\n")
+    subagents(home / "roles")
+    (home / "shortcuts").mkdir(parents=True)
+    (home / "shortcuts" / "note.md").write_text("Take a note.\n", encoding="utf-8")
+    (home / "policy").mkdir(parents=True)
+    (home / "policy" / "tone.md").write_text("Be brief.\n", encoding="utf-8")
+    return {name: home / name for name in ("bundles", "roles", "shortcuts", "policy")}
+
+
+def test_the_composition_of_a_set_is_given_on_the_command_line(tmp_path: Path) -> None:
+    """Every part of a set reaches the run through an option, from folders named anything.
+
+    The modular half of the command has taken a composition since the reading of a set was
+    written, and until there are options for it a person can still only ever name one skill
+    folder. The names below are the owner's, not the target's and not this repository's:
+    that a set laid out differently converts by the same rules is the whole reason the
+    composition is data rather than a walk of a fixed tree.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    out = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "--skills",
+            str(parts["bundles"]),
+            "--agents",
+            str(parts["roles"]),
+            "--commands",
+            str(parts["shortcuts"]),
+            "--rules",
+            str(parts["policy"] / "tone.md"),
+            "--translation",
+            str(translation_file(tmp_path, MOVING)),
+            "--source",
+            SOURCE,
+            "--target",
+            TARGET,
+            "--specs",
+            str(root),
+            "--allow-stale",
+            "--out",
+            str(out),
+        ],
+    )
+    report = json.loads(result.stdout)
+
+    assert [entry["kind"] for entry in report["assets"]] == [
+        "skill",
+        "subagent",
+        "command",
+        "rules-file",
+    ]
+    assert report["rules_version"] == "2.0"
+    # The other half of the same acceptance: a run that assembled says how to install what
+    # it assembled, or the folder it made is as far as anybody gets.
+    assert convert_module.INSTALL_WITH in report["advice"]
+    assert (out / ".agents/skills/note-taker-antigravity/SKILL.md").exists()
+    assert (out / ".agents/agents/note-keeper.md").exists()
+    assert (out / ".agents/rules/tone.md").exists()
+
+
+def test_install_writes_into_the_roots_the_target_description_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The gap this whole track is about: on disk somewhere, and read by the environment.
+
+    Both spellings a layout path can open with are exercised at once -- the skills root of
+    this description says `<workspace-root>/` and its agents root says neither, which is the
+    same root by a different spelling. Neither is written here or anywhere else in the
+    module: the placeholder and the bare path are expanded where every other destination is.
+    The workspace is a folder of this test's own, so what a live root means is decided by
+    where the command runs and not by whose machine it runs on.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    result = convert_set(
+        Inputs(
+            translation=MOVING,
+            skills=(parts["bundles"],),
+            agents=(parts["roles"],),
+            rules=(parts["policy"] / "tone.md",),
+        ),
+        SOURCE,
+        TARGET,
+        root=root,
+        install=True,
+        allow_stale=True,
+    )
+    announced = capsys.readouterr().err
+
+    assert (workspace / ".agents/skills/note-taker-antigravity/SKILL.md").exists()
+    assert "model: pro" in (workspace / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+    assert "trigger: always_on" in (workspace / ".agents/rules/tone.md").read_text(encoding="utf-8")
+    assert str(workspace / ".agents/agents/note-keeper.md") in announced
+    assert str(workspace / ".agents/rules/tone.md") in {
+        entry["path"] for entry in result.report["written"]
+    }
+
+
+def test_a_second_install_names_what_is_already_there_and_replaces_none_of_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Run twice over a live root, and the second run shows the places and touches nothing.
+
+    This is also where the order is proved: the second run writes nothing at all, and the
+    plan is on the error stream anyway. A plan printed after the writing would be a receipt,
+    and a receipt is no help to somebody deciding whether to let a command near their own
+    folders.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    inputs = Inputs(translation=MOVING, agents=(parts["roles"],))
+    convert_set(inputs, SOURCE, TARGET, root=root, install=True, allow_stale=True)
+    placed = workspace / ".agents/agents/note-keeper.md"
+    first = placed.read_bytes()
+    capsys.readouterr()
+    subagents(parts["roles"], frontmatter="model: opus\ncolor: red\n")
+
+    result = convert_set(inputs, SOURCE, TARGET, root=root, install=True, allow_stale=True)
+    announced = capsys.readouterr().err
+
+    assert result.exit_code == 8
+    assert placed.read_bytes() == first
+    assert f"{placed} <- " in announced
+    assert "ALREADY THERE" in announced
+    assert str(placed) in result.report["error"]
+
+
+def test_install_and_out_together_are_refused_because_a_run_has_one_destination(
+    tmp_path: Path,
+) -> None:
+    """Two destinations is not a question with an answer, and guessing one is the worse half.
+
+    Refused before anything is read, and refused with a report like every other outcome: a
+    caller that reads the report to find out what happened gets the reason there, not only
+    on the stream a person reads.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(parts["roles"],)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        install=True,
+        allow_stale=True,
+    )
+
+    assert result.exit_code == 7
+    assert "--install" in result.report["error"] and "--out" in result.report["error"]
+    assert not out.exists()
+
+
+def test_translation_rules_that_do_not_read_end_in_a_report_and_not_a_traceback(
+    tmp_path: Path,
+) -> None:
+    """The file is an argument, and an argument to correct is not a stack trace.
+
+    Left to itself this exits 1 -- the code for a transfer that lost something -- and says
+    nothing a caller can parse, about a run that never judged anything at all.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("rules_version: 1.0\nundocumented: {}\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "--agents",
+            str(parts["roles"]),
+            "--translation",
+            str(broken),
+            "--source",
+            SOURCE,
+            "--target",
+            TARGET,
+            "--specs",
+            str(root),
+            "--allow-stale",
+        ],
+    )
+    issued = json.loads(result.stdout)
+
+    assert result.exit_code == 6
+    assert issued["exit_code"] == 6
+    assert str(broken) in issued["error"]
+    assert "Traceback" not in result.stderr

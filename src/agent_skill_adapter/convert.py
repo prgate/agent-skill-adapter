@@ -25,6 +25,7 @@ import json
 import os.path
 import re
 import shutil
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -846,6 +847,47 @@ def _destination(template: str, skill_name: str) -> tuple[str, str]:
     return path, path
 
 
+def _live(template: str, skill_name: str) -> Path:
+    """The same layout path as a place on this machine, for a run that writes into one.
+
+    The two roots a layout path can open with are the home folder and the workspace root,
+    and a path that names neither is measured from the workspace root as well -- which is
+    the folder this command was run in. Nothing else here knows any of those three: they
+    come out of the description, exactly as ``_destination`` reads them for a staged run.
+    """
+    path = template.replace(SKILL_NAME, skill_name)
+    if path.startswith(f"{HOME}/"):
+        return Path(os.path.normpath(Path.home() / path[len(HOME) + 1 :]))
+    if path.startswith(f"{WORKSPACE_ROOT}/"):
+        path = path[len(WORKSPACE_ROOT) + 1 :]
+    return Path(os.path.normpath(Path.cwd() / path))
+
+
+@dataclass(frozen=True)
+class _Where:
+    """Where this run puts what it assembles, and what a written part must stay under."""
+
+    out: Path | None
+    """The folder the caller named, or ``None`` for the live roots of the target (FR-50i).
+
+    The two are one question asked in two places -- where a part is written, and what it is
+    not allowed to leave -- so they are answered together and never by two callers apart.
+    """
+
+    def place(self, root: str, inside: str, skill_name: str) -> tuple[str, Path, Path]:
+        """One layout path as three: where it belongs, where it is written, and under what.
+
+        ``root`` is the layout entry an entity of this kind lives in and ``inside`` the path
+        below it. They arrive apart and stay apart, because the root is what the written
+        part is held to: measured from the whole path instead, every destination would be
+        its own root and the check would pass on anything.
+        """
+        where, staged = _destination(f"{root.rstrip('/')}/{inside}", skill_name)
+        if self.out is None:
+            return where, _live(f"{root.rstrip('/')}/{inside}", skill_name), _live(root, skill_name)
+        return where, _under(self.out, staged), self.out
+
+
 @dataclass(frozen=True)
 class _Part:
     """One file or directory of the assembled skill, and the two places it has."""
@@ -855,7 +897,14 @@ class _Part:
     destination: str
     """Where the target description says it belongs."""
     staged: Path
-    """Where this run put it, always under ``out``."""
+    """Where this run put it: under ``out``, or in the root of the target it belongs in."""
+    root: Path
+    """The folder this part may not leave -- ``out``, or the target root it is written into.
+
+    Carried per part rather than passed once to the assembly, because a run that installs
+    writes into several roots at once and each part is held to the one its destination was
+    measured from.
+    """
     copied_from: Path | None = None
     content: str | None = None
     """The bytes to write, where the part is written rather than copied from where it came.
@@ -1008,7 +1057,7 @@ copied byte for byte, which is what a file nobody has a rule about deserves.
 
 def _plan(
     entity: Assessed,
-    out: Path,
+    where_: _Where,
     target: EnvSpec,
     scope: Scope,
     translation: Rules,
@@ -1024,7 +1073,7 @@ def _plan(
     """
     asset = entity.asset
     if not entity.name:
-        return _undocumented(entity, out, translation)
+        return _undocumented(entity, where_, translation)
     if entity.assembled_name is None:
         return [], []
     root = _layout(target, ROOT_ENTRY[asset.kind][scope])
@@ -1036,7 +1085,7 @@ def _plan(
     if asset.kind is Kind.SKILL:
         return _plan_skill(
             asset.path,
-            out,
+            where_,
             target,
             scope,
             entity.properties,
@@ -1046,12 +1095,13 @@ def _plan(
             translations=entity.translations,
         )
     rewrite = CONTENT.get(asset.kind)
-    where, staged = _destination(f"{root.rstrip('/')}/{entity.assembled_name}", entity.name)
+    where, staged, under = where_.place(root, entity.assembled_name, entity.name)
     return [
         _Part(
             asset.path.name,
             where,
-            _under(out, staged),
+            staged,
+            under,
             copied_from=asset.path,
             content=None if rewrite is None else rewrite(asset.path, entity.translations),
         )
@@ -1073,7 +1123,23 @@ into the result, under the name of the part it was found in, and the caller plac
 """
 
 
-def _undocumented(entity: Assessed, out: Path, translation: Rules) -> tuple[list[_Part], list[str]]:
+NOWHERE_TO_STAGE = (
+    "is left where it is: no description names a place for it, this run was told to write "
+    "into the roots of the target environment, and every one of those is read as a folder "
+    "of entities of one kind -- so there is nowhere to put it that would not be read as a "
+    "broken entity. Assemble under `--out` instead to have it carried beside the set"
+)
+"""Why a run that installs carries no file that no description declares.
+
+A staged run has a folder of its own to put such a file in (:data:`STAGED_NOT_PLACED`); a
+run writing into the target's own roots has none, and the rule that they hold entities and
+nothing else is the same rule in both places.
+"""
+
+
+def _undocumented(
+    entity: Assessed, where_: _Where, translation: Rules
+) -> tuple[list[_Part], list[str]]:
     """The paths of a named part that no description declares, if the rules say to carry them.
 
     The rules state one rule for such a file (FR-30) and this is where it is carried out:
@@ -1085,20 +1151,26 @@ def _undocumented(entity: Assessed, out: Path, translation: Rules) -> tuple[list
     """
     if translation.undocumented.action != "copy":
         return [], []
+    carried = [
+        finding.found_as
+        for finding in entity.asset.findings
+        if not finding.ids and finding.note == UNDECLARED_PATH
+    ]
+    if where_.out is None:
+        return [], [f"`{found_as}` {NOWHERE_TO_STAGE}" for found_as in carried]
     parts = []
-    for finding in entity.asset.findings:
-        if finding.ids or finding.note != UNDECLARED_PATH:
-            continue
+    for found_as in carried:
         # The name of the named part and then the path as it was found inside it: the input
         # laid out as it was given, which is the one arrangement of these files anybody has
         # ever stated. Two parts holding a `README.md` each keep one apiece by it.
-        staged = f"{entity.asset.path.name}/{finding.found_as}"
+        staged = f"{entity.asset.path.name}/{found_as}"
         parts.append(
             _Part(
-                finding.found_as,
+                found_as,
                 staged,
-                _under(out, staged),
-                copied_from=entity.asset.path / finding.found_as,
+                _under(where_.out, staged),
+                where_.out,
+                copied_from=entity.asset.path / found_as,
             )
         )
     return parts, [f"`{part.label}` {STAGED_NOT_PLACED}" for part in parts]
@@ -1106,7 +1178,7 @@ def _undocumented(entity: Assessed, out: Path, translation: Rules) -> tuple[list
 
 def _plan_skill(
     skill_dir: Path,
-    out: Path,
+    where_: _Where,
     target: EnvSpec,
     scope: Scope,
     properties: Sequence[Property],
@@ -1135,13 +1207,14 @@ def _plan_skill(
         # or a part could end up written and called left behind, or in neither list.
         if inside is None:
             continue
-        where, staged = _destination(f"{root.rstrip('/')}/{inside}", assembled_name)
+        where, staged, under = where_.place(root, inside, assembled_name)
         source_file = skill_dir / label
         parts.append(
             _Part(
                 label,
                 where,
-                _under(out, staged),
+                staged,
+                under,
                 copied_from=source_file,
                 # Only the skill file carries a header, so it is the only part a rule can
                 # have been applied to. `None` when none were, and then the bytes are copied
@@ -1159,7 +1232,17 @@ def _plan_skill(
     # descriptions do spell it -- would otherwise reach the report with the placeholder
     # still in it, telling a person to put the entry in a folder named `<workspace-root>`.
     where, _ = _destination(hooks_file, assembled_name)
-    hook_part = _hook_part(out, where, carried)
+    if where_.out is None:
+        # The entry is staged beside the assembled skill and never merged into the file
+        # itself (FR-40), and a run writing into the target's own roots has nowhere to stage
+        # it: the alternative is editing a file that belongs to the whole environment and
+        # may already hold somebody else's entries, which is the one thing that rule forbids.
+        return parts, [
+            f"the hook entry of `{assembled_name}` is not written anywhere: it belongs in "
+            f"{where}, a file of the whole target environment that this run will not edit, "
+            "so add it there yourself -- or assemble under `--out`, which stages it for you"
+        ]
+    hook_part = _hook_part(where_.out, where, carried)
     return [*parts, hook_part], [
         f"the hook entry is staged at {hook_part.staged} and not merged into "
         f"{hook_part.destination}: that file belongs to the whole target environment and "
@@ -1288,6 +1371,7 @@ def _hook_part(out: Path, destination: str, carried: Mapping[str, Any]) -> _Part
         # file it belongs in, never at the destination itself: merging into a file that may
         # already hold someone else's entries is FR-40.
         _under(out, Path(destination).name),
+        out,
         # No rescue argument here, and none needed: every value came through `_portable`,
         # which is where a header meets JSON. A date is already the text ISO 8601 spells,
         # and a shape with no stable text never got this far -- the file was refused as it
@@ -1297,12 +1381,12 @@ def _hook_part(out: Path, destination: str, carried: Mapping[str, Any]) -> _Part
     )
 
 
-def _links_on_the_way(out: Path, staged: Path) -> None:
-    """Refuse a symbolic link at any level of ``staged`` below ``out``, the last one included.
+def _links_on_the_way(root: Path, staged: Path) -> None:
+    """Refuse a symbolic link at any level of ``staged`` below ``root``, the last one included.
 
     Every level, because every one of them is a door out: `mkdir(parents=True,
     exist_ok=True)` walks through a link in the middle of a path without a word, and a copy
-    at the end follows one, so a link anywhere below `out` puts the bytes where it points.
+    at the end follows one, so a link anywhere below `root` puts the bytes where it points.
     Asked here rather than with the checks over the whole plan, so that the answer is as
     fresh as it can be: what is asked of a path and what is then done to it are two moments,
     and the shorter the gap the less of it another process can use.
@@ -1313,14 +1397,14 @@ def _links_on_the_way(out: Path, staged: Path) -> None:
     # follow links -- `O_NOFOLLOW` and `dir_fd` down every level of the path -- which is the
     # path sandbox of FR-14, deferred twice by the user and a block of work of its own.
     below = [
-        level for level in reversed(staged.parents) if level != out and level.is_relative_to(out)
+        level for level in reversed(staged.parents) if level != root and level.is_relative_to(root)
     ]
     for level in [*below, staged]:
         if level.is_symlink():
             raise ConvertError(
                 f"{level} is a symbolic link, and no level of a destination is written "
                 f"through one: the bytes would go where the link points rather than under "
-                f"{out}, which is the one promise this command makes about the caller's "
+                f"{root}, which is the one promise this command makes about the caller's "
                 "filesystem",
                 UNWRITABLE,
             )
@@ -1621,11 +1705,13 @@ def _relinked(
     return settled, pointed, said
 
 
-def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], list[str]]:
+def _assemble(parts: Sequence[_Part]) -> tuple[list[dict[str, str]], list[str]]:
     """Copy or write every planned part, once the whole plan is known to be safe to write.
 
     Two questions are asked of every destination before the first byte of the first one is
-    written: is the place free, and is it under ``out``. Both run over the whole plan, because
+    written: is the place free, and is it under the root the part belongs to -- the folder
+    the caller named, or the root of the target environment its destination was measured
+    from. Both run over the whole plan, because
     a run that wrote two files and then refused the third would have done the damage it
     refused to do.
 
@@ -1662,7 +1748,7 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
     # Over the whole plan, and answered again level by level in `_links_on_the_way` before
     # each part is written: this one rules out a destination that leads out of `out` at all,
     # that one rules out the path having changed since.
-    root = _resolved(out)
+    roots = {part.root: _resolved(part.root) for part in parts}
     # The parent resolved and the last name left as written: what this asks is where the file
     # would be created. A link at the destination itself is not a way out of `out` but an
     # occupied place, and the check below answers for it with the code for that; resolving it
@@ -1674,12 +1760,16 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
         (part, Path(os.path.normpath(_resolved(part.staged.parent) / part.staged.name)))
         for part in parts
     ]
-    outside = [str(part.staged) for part, place in places if not place.is_relative_to(root)]
+    outside = [
+        f"{part.staged} is not under {part.root}"
+        for part, place in places
+        if not place.is_relative_to(roots[part.root])
+    ]
     if outside:
         raise ConvertError(
-            ", ".join(outside) + f" is not under {out}; nothing was written, because the one "
+            ", ".join(outside) + "; nothing was written, because the one "
             "promise this command makes about the caller's filesystem is that it writes "
-            "under the folder the caller named and nowhere else",
+            "under the roots it was told to write under and nowhere else",
             # The plan failed the check made before writing, which is its own outcome
             # (FR-37) and not a verdict: like an occupied destination, being unable to write
             # says nothing about what the skill costs to transfer. Exit code 3 here would
@@ -1693,12 +1783,12 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
     # reason: the fault is in the plan, and what the skill costs to transfer is untouched by
     # it. Not the code for an occupied place, which would make the answer depend on whether
     # `out` happens to exist yet -- met as an empty name it would be written straight through.
-    onto = [str(part.staged) for part, place in places if place == root]
+    onto = [str(part.staged) for part, place in places if place == roots[part.root]]
     if onto:
         raise ConvertError(
-            ", ".join(onto) + f" is {out} itself, the folder this run was told to assemble "
-            "into; nothing was written, because a part of a skill put there would replace "
-            "the folder the caller named with one piece of what was supposed to go inside it",
+            ", ".join(onto) + " is the root this run was told to write into, not a place "
+            "inside it; nothing was written, because a part of a skill put there would "
+            "replace that root with one piece of what was supposed to go inside it",
             UNWRITABLE,
         )
     # The plan against itself, and apart from the plan against what is already there: a
@@ -1736,7 +1826,7 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
             # answered for the plan as a whole, and a path is only as checked as it is fresh.
             # Before `started` grows, so that a refusal here takes back what this run wrote
             # and never the link it refused to write through.
-            _links_on_the_way(out, part.staged)
+            _links_on_the_way(part.root, part.staged)
             part.staged.parent.mkdir(parents=True, exist_ok=True)
             started.append(part)
             if part.content is not None:
@@ -1771,8 +1861,7 @@ def _assemble(out: Path, parts: Sequence[_Part]) -> tuple[list[dict[str, str]], 
             else:
                 part.staged.unlink(missing_ok=True)
         raise ConvertError(
-            f"nothing was assembled under {out}, and what this run had written there is "
-            f"taken back: {error}",
+            f"nothing was assembled, and what this run had already written is taken back: {error}",
             # The same code as a destination outside `out`, and for the same reason: we could
             # not write. FR-27 has one row for that side of the run, and what the skill costs
             # to transfer was decided before any of it was written.
@@ -1972,6 +2061,53 @@ def _summary(report: dict[str, Any]) -> str:
     return "\n".join(_plain(line) for line in lines) + "\n"
 
 
+INSTALL_WITH = (
+    "nothing was put where the target environment reads it: this run only assembled the "
+    "set. Repeat the command with `--install` in place of `--out` to write every part to "
+    "the destination named beside it above, in the roots the target description gives"
+)
+"""The ready way to install, printed by every run that assembled instead of installing.
+
+A copy of the assembled tree is not it: the destinations of one run can be measured from
+two different roots -- the workspace and the home folder -- so there is no one folder to
+copy it into, and a command that told a person to copy it anyway would be telling them to
+put half of it in the wrong place.
+"""
+
+
+def _announced(parts: Sequence[_Part]) -> str:
+    """The whole plan in words: every place about to be written, and which are already taken.
+
+    Taken places are named here as well as refused below, and the two are not the same
+    thing said twice: the refusal is about the run, this is about the caller's folders, and
+    a person reading a list of paths wants to know which of them hold something of theirs
+    before a single one is touched.
+    """
+    lines = ["about to write into the roots the target description names:"]
+    lines += [
+        f"  {part.staged} <- `{part.label}`"
+        + (
+            " -- ALREADY THERE, and nothing here is replaced: this run stops instead"
+            if part.staged.exists() or part.staged.is_symlink()
+            else ""
+        )
+        for part in parts
+    ]
+    return "\n".join(_plain(line) for line in lines) + "\n"
+
+
+def refusal(source: str | None, target: str | None, exit_code: int, message: str) -> Conversion:
+    """A run that never started, in the shape every run of this command ends in.
+
+    Something a run needs before it can read anything -- the translation rules above all --
+    can be missing or unreadable, and the caller of this module has no other way to say so
+    in the report and the words a run always answers with. The version of the rules is empty
+    because there are none: a number invented here would name rules nobody read.
+    """
+    report = _report(source, target, "", Verdict.UNDECIDABLE, exit_code, (), (), (), (), message)
+    return Conversion(Verdict.UNDECIDABLE, exit_code, report, _summary(report))
+
+
 def refused(result: Conversion, exit_code: int, message: str) -> Conversion:
     """The same run, ending in something that went wrong after it: the report says what.
 
@@ -2120,6 +2256,7 @@ def convert(
     *,
     root: str | Path = "specs",
     out: str | Path | None = None,
+    install: bool = False,
     scope: Scope = Scope.PROJECT,
     allow_stale: bool = False,
 ) -> Conversion:
@@ -2135,9 +2272,34 @@ def convert(
 
     The verdict of the run is the worst of the whole set, exactly as the verdict of one
     entity is the worst of its rows. Without ``out`` nothing is written and the report is the
-    whole answer. With it, every skill of the set is assembled under ``out`` at the paths the
-    target description names, at the level ``scope`` chooses.
+    whole answer. With it, every entity of the set the target names a root for is assembled
+    under ``out`` at the paths the target description names, at the level ``scope`` chooses.
+
+    ``install`` writes those same destinations into the roots of the target environment on
+    this machine instead, and then the whole plan goes to the error stream before the first
+    byte of it is written: what a person is asked to trust with their own folders is what
+    they were shown first. It rules out ``out``, because a run has one destination and not
+    two, and it changes nothing about what the transfer costs -- the verdict is computed
+    before either of them is looked at.
     """
+    if install and out is not None:
+        # Before anything is read: the arguments contradict each other, and every answer
+        # this run could give about the set would be an answer to a question nobody asked.
+        report = _report(
+            source,
+            target,
+            inputs.translation.version,
+            Verdict.UNDECIDABLE,
+            UNWRITABLE,
+            (),
+            (),
+            (),
+            (),
+            "`--install` and `--out` name two destinations and a run has one: drop `--out` "
+            "to write into the roots of the target environment, or drop `--install` to "
+            "assemble under the folder you named",
+        )
+        return Conversion(Verdict.UNDECIDABLE, UNWRITABLE, report, _summary(report))
     assessed: list[Assessed] = []
     advice: list[str] = []
     written: list[dict[str, str]] = []
@@ -2171,17 +2333,17 @@ def convert(
         verdict = worst(entity.verdict for entity in assessed)
         # An undecidable run assembles nothing: the transferable half of a set whose other
         # half nobody documented is a folder that looks converted and is not.
-        if out is not None and verdict is not Verdict.UNDECIDABLE:
+        if (out is not None or install) and verdict is not Verdict.UNDECIDABLE:
             # One spelling of `out` from here down. Every check below counts the levels of a
             # destination by text -- `_under` against a collapsed path, `_links_on_the_way`
-            # against `out` itself -- so a `..` the caller typed and a `..` collapsed away
+            # against the root itself -- so a `..` the caller typed and a `..` collapsed away
             # are two paths that name one folder, and levels compared across the two match
             # nowhere: a link partway down goes unasked and is written through, on a run the
             # report then calls clean.
-            out_dir = Path(os.path.normpath(out))
+            where = _Where(None if out is None else Path(os.path.normpath(out)))
             parts: list[_Part] = []
             for entity in assessed:
-                planned, asked = _plan(entity, out_dir, target_spec, scope, inputs.translation)
+                planned, asked = _plan(entity, where, target_spec, scope, inputs.translation)
                 parts += planned
                 advice += asked
             # One plan for the whole set, checked whole before the first byte: two skills of
@@ -2192,8 +2354,16 @@ def convert(
             # has contributed its parts.
             parts, links, addressed = _relinked(parts, inputs)
             advice += addressed
-            written, linked = _assemble(out_dir, parts)
+            if where.out is None:
+                # Before the first byte and not behind a flag of its own: what a run is
+                # about to do to somebody's own folders is the one thing they have to be
+                # able to read before it happens, and an option to ask for it is an option
+                # to forget. To the error stream, where everything for a person goes.
+                sys.stderr.write(_announced(parts))
+            written, linked = _assemble(parts)
             advice += linked
+            if where.out is not None and written:
+                advice.append(INSTALL_WITH)
     except (ConvertError, ReadError, OSError) as error:
         # Three shapes of refusal and one answer: what this module raised, what the reading of
         # the set raised and what the filesystem raised all leave as a report and a code, so
