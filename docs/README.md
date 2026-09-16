@@ -12,6 +12,7 @@ Welcome to the **Agent Skill Adapter** documentation hub.
 
 ### Runs
 - [Converting a real skill](converting-a-real-skill.md) — три прогона команды `convert` на скиллах из `~/.claude/skills/`: что переносится, что переносится с потерей и что упирается в «сведений недостаточно».
+- [Live acceptance](live-acceptance.md) — воспроизводимая процедура: перенести набор во временную рабочую область и спросить живой Antigravity CLI, что он на самом деле загрузил; дословные ответы среды версии 1.2.4.
 
 ## 🧭 Repository Navigation
 - [Project Readme](../README.md) — что делает адаптер, схема работы и быстрый старт.
