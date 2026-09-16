@@ -2273,8 +2273,13 @@ MOVING = Rules.model_validate(
 """Rules for a set of several kinds: a model tier to translate and a header to add."""
 
 
-def destinations_tree(tmp_path: Path) -> Path:
-    """Descriptions whose target names a place for every kind of this set except a command."""
+def destinations_tree(tmp_path: Path, agents_root: str = ".agents/agents/") -> Path:
+    """Descriptions whose target names a place for every kind of this set except a command.
+
+    ``agents_root`` is the one layout path a caller here may choose, because where a root is
+    measured from is what a run that installs is held to: a test about a path leading out of
+    every root needs a description that names one.
+    """
     root = tmp_path / "specs"
     fields: list[dict[str, Any]] = [
         {"kind": "subagent-field", "id": entry, "support": "supported"} for entry in SUBAGENT_FIELDS
@@ -2303,7 +2308,7 @@ def destinations_tree(tmp_path: Path) -> Path:
             {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
             {"id": "skill.top.CHANGELOG.md", "path": "<skill-name>/CHANGELOG.md"},
             {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
-            {"id": "agents.project", "path": ".agents/agents/"},
+            {"id": "agents.project", "path": agents_root},
             {"id": "agents.user", "path": "~/.gemini/config/agents/"},
             {"id": "rules.project", "path": ".agents/rules/"},
         ],
@@ -3027,3 +3032,62 @@ def test_a_rule_file_the_target_names_a_root_for_does_not_cost_the_run_its_verdi
     assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
     assert rows(result.report)["rules.project"]["target_says"] == ".agents/rules/"
     assert (out / ".agents/rules/tone.md").exists()
+
+
+def test_install_refuses_a_destination_that_leads_out_of_the_home_and_the_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one promise this command makes about a caller's filesystem, on the run that can break it.
+
+    A layout path is measured from the home folder or from the workspace, and those two are
+    the roots an installing run may write under. A path measured from neither -- a target
+    description naming an absolute one, here or after a vendor edits their own -- is the
+    same refusal `--out` answers with, and this is the only place in the project where the
+    command writes into folders that are really somebody's.
+    """
+    escape = tmp_path / "escape"
+    root = destinations_tree(tmp_path, agents_root=f"{escape}/")
+    parts = a_set_on_disk(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(parts["roles"],)),
+        SOURCE,
+        TARGET,
+        root=root,
+        install=True,
+        allow_stale=True,
+    )
+
+    assert not escape.exists()
+    assert result.exit_code == 7
+
+
+def test_install_at_the_user_level_writes_under_the_home_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The branch with the widest blast radius of anything here, and it had no test at all.
+
+    The home folder is this test's own, so nothing of the machine it runs on is touched --
+    which is also the only way to have the branch run at all.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+
+    convert_set(
+        Inputs(translation=MOVING, agents=(parts["roles"],)),
+        SOURCE,
+        TARGET,
+        root=root,
+        install=True,
+        scope=Scope.USER,
+        allow_stale=True,
+    )
+
+    assert (home / ".gemini/config/agents/note-keeper.md").exists()

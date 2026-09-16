@@ -871,20 +871,27 @@ def _destination(template: str, skill_name: str) -> tuple[str, str]:
     return path, path
 
 
-def _live(template: str, skill_name: str) -> Path:
-    """The same layout path as a place on this machine, for a run that writes into one.
+def _live(template: str, skill_name: str) -> tuple[Path, Path]:
+    """A layout path as a place on this machine, and the root it is measured from.
 
     The two roots a layout path can open with are the home folder and the workspace root,
     and a path that names neither is measured from the workspace root as well -- which is
     the folder this command was run in. Nothing else here knows any of those three: they
     come out of the description, exactly as ``_destination`` reads them for a staged run.
+
+    The root is one of those two and never the expanded path itself. Returned as its own
+    answer, a layout path that is already absolute would arrive as both the destination and
+    the root it must stay under, and the check that it does would be true by construction --
+    the description, or an edit a vendor makes to it, would be choosing where on this
+    machine the command writes. Measured from the workspace instead, such a path is under
+    neither root and `_assemble` refuses it exactly as it refuses one leading out of ``out``.
     """
     path = template.replace(SKILL_NAME, skill_name)
     if path.startswith(f"{HOME}/"):
-        return Path(os.path.normpath(Path.home() / path[len(HOME) + 1 :]))
+        return Path(os.path.normpath(Path.home() / path[len(HOME) + 1 :])), Path.home()
     if path.startswith(f"{WORKSPACE_ROOT}/"):
         path = path[len(WORKSPACE_ROOT) + 1 :]
-    return Path(os.path.normpath(Path.cwd() / path))
+    return Path(os.path.normpath(Path.cwd() / path)), Path.cwd()
 
 
 @dataclass(frozen=True)
@@ -902,13 +909,13 @@ class _Where:
         """One layout path as three: where it belongs, where it is written, and under what.
 
         ``root`` is the layout entry an entity of this kind lives in and ``inside`` the path
-        below it. They arrive apart and stay apart, because the root is what the written
-        part is held to: measured from the whole path instead, every destination would be
-        its own root and the check would pass on anything.
+        below it. What a part is held to is never a path the description chose: it is the
+        folder the caller named, or -- for a run that installs -- the home folder or the
+        workspace the layout path is measured from, which is `_live`'s second answer.
         """
         where, staged = _destination(f"{root.rstrip('/')}/{inside}", skill_name)
         if self.out is None:
-            return where, _live(f"{root.rstrip('/')}/{inside}", skill_name), _live(root, skill_name)
+            return (where, *_live(f"{root.rstrip('/')}/{inside}", skill_name))
         return where, _under(self.out, staged), self.out
 
 
