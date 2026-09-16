@@ -34,6 +34,7 @@ from agent_skill_adapter.assets import (
     DROPPED,
     EMPTY,
     EVENT,
+    FRONTMATTER_CLOSE,
     HOOKS_KEY,
     LINKED,
     PARTS,
@@ -771,7 +772,79 @@ class _Part:
     """Where this run put it, always under ``out``."""
     copied_from: Path | None = None
     content: str | None = None
-    """Set instead of ``copied_from`` when the part is written rather than copied."""
+    """The bytes to write, where the part is written rather than copied from where it came.
+
+    Set beside ``copied_from`` and not instead of it for a part that came from a file and
+    leaves changed -- the skill file with a translated header. The content is what is
+    written; ``copied_from`` still says where it came from, which is what the report reads
+    to say whether that path was a symbolic link.
+    """
+
+
+_OPENS_A_KEY = re.compile(r"([^\s:#][^:]*):(.*)$")
+"""A header line that opens a top-level key: a name at column one, then a colon.
+
+A line that begins with a space continues the value of the key above it, whatever it holds
+-- a nested mapping, an item of a list, the next line of a folded scalar -- and a line that
+begins with `#` is a comment. Neither opens a key, and neither ends the value being read.
+"""
+
+
+def _in_the_value_of(header: str, key: str, was: str, became: str) -> str:
+    """``header`` with ``was`` replaced by ``became`` inside the value of ``key``, and nowhere else.
+
+    The file is somebody's, and the one thing this run is entitled to change in it is the
+    value a rule was applied to. So the header is edited where it stands rather than parsed
+    and dumped again: a round trip through YAML would return a file with its comments gone,
+    its quoting redecided and its keys reordered, all of it unannounced and none of it
+    translation. Whole words only -- a tier named `pro` must not turn the `sonnet` inside
+    `sonnet-2.0` into one.
+
+    # ponytail: a comment written on the same line as a translated value is inside that
+    # value as far as this is concerned, and a word in it that matches is replaced too. The
+    # way up is the line and column `yaml` already knows for every node, which means holding
+    # on to the parsed header rather than only to what it loaded.
+    """
+    spelled = re.compile(rf"(?<![\w.-]){re.escape(was)}(?![\w.-])")
+    lines = header.split("\n")
+    inside = False
+    for index, line in enumerate(lines):
+        opens = _OPENS_A_KEY.match(line)
+        if opens is None:
+            # A continuation line: it belongs to whichever key was opened last, so it is
+            # rewritten exactly when that key is the one being translated.
+            lines[index] = spelled.sub(became, line) if inside else line
+            continue
+        inside = opens.group(1).strip().strip("'\"") == key
+        if inside:
+            lines[index] = line[: opens.start(2)] + spelled.sub(became, opens.group(2))
+    return "\n".join(lines)
+
+
+def _with_translations(path: Path, applied: Sequence[Mapping[str, str]]) -> str | None:
+    """The skill file with every applied rule in its header, or ``None`` when none were.
+
+    The report says a value was translated, and this is what makes that true of the file the
+    caller ends up with: without it the run would state a rewrite that never happened and
+    call the transfer clean while the target's own set still refuses what was written.
+
+    The body below the header is not touched at all, and neither is a key no rule applied to.
+    """
+    if not applied:
+        return None
+    text = path.read_text(encoding="utf-8")
+    closing = FRONTMATTER_CLOSE.search(text, 3)
+    if closing is None:
+        # Unreachable: a file whose header never closes was refused while it was being read,
+        # and there would be no translation to apply to it. Answered rather than asserted,
+        # because the answer is the file exactly as it was found.
+        return None
+    header = text[3 : closing.start()]
+    for rule in applied:
+        # The key is the last step of the entry id: the ids of a header field are built from
+        # the key as written (`assets`), so this takes it back without a table of pairs.
+        header = _in_the_value_of(header, rule["id"].rpartition(".")[2], rule["from"], rule["to"])
+    return f"---{header}{text[closing.start() :]}"
 
 
 def _plan(
@@ -784,6 +857,7 @@ def _plan(
     *,
     root: str,
     assembled_name: str,
+    translations: Sequence[Mapping[str, str]] = (),
 ) -> tuple[list[_Part], list[str]]:
     """What the assembly will write, and what it asks of a person once it has.
 
@@ -804,7 +878,21 @@ def _plan(
         if inside is None:
             continue
         where, staged = _destination(f"{root.rstrip('/')}/{inside}", assembled_name)
-        parts.append(_Part(label, where, _under(out, staged), copied_from=skill_dir / label))
+        source_file = skill_dir / label
+        parts.append(
+            _Part(
+                label,
+                where,
+                _under(out, staged),
+                copied_from=source_file,
+                # Only the skill file carries a header, so it is the only part a rule can
+                # have been applied to. `None` when none were, and then the bytes are copied
+                # exactly as every other part's are.
+                content=(
+                    _with_translations(source_file, translations) if label == SKILL_MD else None
+                ),
+            )
+        )
     carried, hooks_file = _hook_place(target, scope, properties, hooks)
     if not carried or hooks_file is None:
         return parts, []
@@ -1592,6 +1680,7 @@ def convert(
                     _hooks_of(entity.asset),
                     root=ground,
                     assembled_name=entity.assembled_name,
+                    translations=entity.translations,
                 )
                 parts += planned
                 advice += asked

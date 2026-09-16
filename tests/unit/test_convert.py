@@ -1832,6 +1832,41 @@ SUBAGENT_FIELDS = (
 )
 
 
+SKILL_TRANSLATING = Rules.model_validate(
+    {
+        "rules_version": "2.0",
+        "value_maps": {"skill.frontmatter.model": {"sonnet": "pro"}},
+        "undocumented": {"action": "copy", "note": "nothing declares this file"},
+    }
+)
+"""The same rules against the one kind this command assembles today: a skill."""
+
+
+def translating_tree(tmp_path: Path) -> Path:
+    """Descriptions where the target names a one-value set for the model field of a skill."""
+    root = tmp_path / "specs"
+    fields = [
+        {"id": "skill.frontmatter.name", "support": "supported"},
+        {"id": "skill.frontmatter.description", "support": "supported"},
+        {"id": "skill.frontmatter.model", "support": "supported"},
+        {"id": "skill.frontmatter.licence", "support": "supported"},
+    ]
+    write(root, vendor="anthropic", environment="claude-code", capabilities=fields)
+    target: list[dict[str, Any]] = [dict(entry) for entry in fields]
+    target[2]["values"] = ["pro"]
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=target,
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+        ],
+    )
+    return root
+
+
 def a_subagent(folder: Path, frontmatter: str) -> Inputs:
     """A composition of one folder holding one subagent with the given extra header lines."""
     folder.mkdir(parents=True, exist_ok=True)
@@ -1978,6 +2013,43 @@ def test_a_value_that_is_not_text_is_refused_with_the_file_and_the_field_named(
     assert result.exit_code == 6
     assert str(tmp_path / "roles" / "note-keeper.md") in result.report["error"]
     assert "`model`" in result.report["error"]
+
+
+def test_the_assembled_skill_file_carries_the_translated_value_and_not_the_written_one(
+    tmp_path: Path,
+) -> None:
+    """The bytes that leave, not the report about them: the file says what the run claims.
+
+    A report that prints `translated to pro` over a file still saying `sonnet` states a fact
+    about the caller's data that is not true, and calls the transfer clean while the value
+    the target refuses is exactly what was written. Asserted on the staged file, because the
+    five cases above all watch the report and none of them watches what the caller gets.
+
+    Everything the run did not translate is asserted untouched in the same breath: a header
+    re-dumped wholesale would pass an assertion about `pro` while quietly rewriting the rest
+    of somebody's file, which is the same defect with the blame moved.
+    """
+    root = translating_tree(tmp_path)
+    folder = skill(tmp_path / "alpha", "name: alpha\nmodel: sonnet\nlicence: sonnet-2.0\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=SKILL_TRANSLATING, skill=(folder,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/skills/alpha-antigravity/SKILL.md").read_text(encoding="utf-8")
+
+    assert "model: pro\n" in staged
+    assert "model: sonnet" not in staged
+    # The value of another key, and the body, are none of the translation's business: only
+    # what a rule was applied to may differ from the file the run was given.
+    assert "licence: sonnet-2.0\n" in staged
+    assert staged.endswith("\nBody.\n")
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
 
 
 def test_a_counterpart_the_targets_own_set_does_not_carry_is_a_row_and_not_a_rewrite(
