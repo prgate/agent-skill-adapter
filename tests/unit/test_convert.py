@@ -1623,6 +1623,29 @@ def test_a_rewritten_header_value_is_named_in_the_report(tmp_path: Path) -> None
     assert "2026-09-14" in said[0]
 
 
+def test_a_link_that_leads_nowhere_is_refused_as_the_link_it_is(tmp_path: Path) -> None:
+    """A dangling link is blamed on the link and on what it points at, never on `SKILL.md`.
+
+    `exists()` follows a link, so a link pointing at nothing answers it exactly as a path
+    with nothing at it does -- and the reading, which asks whether there is a skill file at
+    the path, answers both with the words for a folder that holds no skill file. That is the
+    same false blame as a mistyped path, through a narrower door: the folder the person is
+    sent to look inside is a link, and what is wrong is at the other end of it.
+    """
+    root = four_row_tree(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    dangling = tmp_path / "widget"
+    dangling.symlink_to(elsewhere)
+
+    result = convert(dangling, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert (result.verdict, result.exit_code) == (Verdict.UNDECIDABLE, 6)
+    assert result.report["assets"] == []
+    assert str(dangling) in result.report["error"]
+    assert str(elsewhere) in result.report["error"]
+    assert "SKILL.md" not in result.report["error"]
+
+
 def test_a_reason_the_run_has_no_rule_for_is_a_row_whose_verdict_still_counts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

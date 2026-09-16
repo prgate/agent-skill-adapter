@@ -1218,17 +1218,20 @@ def refused(result: Conversion, exit_code: int, message: str) -> Conversion:
 
 
 def _nothing_there(inputs: Inputs) -> list[str]:
-    """Every path the composition names that is not on the filesystem at all.
+    """Every path the composition names that nothing can be read from, and why, one each.
 
     Asked before the set is read, and here rather than in the reading, because the reading
-    opens a named skill folder by asking for its skill file and so answers a path that does
-    not exist with the words for a folder that holds no skill file. That sends a person with
-    a typo in the path looking for a `SKILL.md` inside a folder nobody has. Which paths were
-    named is `PARTS`, the reading's own list of them, so a part added there is asked about
-    here without a line added.
+    opens a named skill folder by asking for its skill file and so answers a path nothing is
+    at with the words for a folder that holds no skill file. That sends a person with a typo
+    in the path looking for a `SKILL.md` inside a folder nobody has. Which paths were named
+    is `PARTS`, the reading's own list of them, so a part added there is asked about here
+    without a line added.
 
-    A broken symbolic link is something at the path: what is wrong with it is what it points
-    at, and the reading names that itself.
+    A link pointing at nothing is named as the link it is, and so is a loop of them: the
+    reading has no word for either -- it asks whether there is a skill file at the path, and
+    a link leading nowhere answers no -- so it too would be reported as a folder without a
+    skill file, which is the same false blame in a narrower door. What is wrong is the link,
+    and what a person has to go and look at is what it points at, so the refusal says both.
     """
     named: list[Path] = []
     for part in PARTS:
@@ -1239,7 +1242,21 @@ def _nothing_there(inputs: Inputs) -> list[str]:
         if value is None:
             continue
         named += [value] if isinstance(value, Path) else list(value)
-    return [str(path) for path in named if not (path.exists() or path.is_symlink())]
+    absent = []
+    for path in named:
+        # The link first, because `exists()` follows one and answers `False` for both cases:
+        # asked the other way round, a link leading nowhere reads as a path with nothing at
+        # it, and the report would name a folder the person can see is there.
+        # `os.readlink` and not `resolve()`: it says what the link itself says, and a loop of
+        # links raises out of `resolve()` -- which is one of the two cases this is about.
+        if path.is_symlink() and not path.exists():
+            absent.append(
+                f"{path} is a symbolic link to {os.readlink(path)}, and there is nothing "
+                "this run can read at the other end of it"
+            )
+        elif not path.exists():
+            absent.append(f"there is nothing at {path}")
+    return absent
 
 
 def _hooks_of(asset: Asset) -> Mapping[str, Any]:
@@ -1328,10 +1345,9 @@ def convert(
         absent = _nothing_there(inputs)
         if absent:
             raise ConvertError(
-                ", ".join(absent) + ": there is nothing at this path, so no part of a set "
-                "could be read from it; the composition names what this run reads, and a "
-                "path in it that is not there is a path to correct rather than a set to "
-                "judge",
+                "; ".join(absent) + ". No part of a set could be read from it: the "
+                "composition names what this run reads, and a path in it that leads nowhere "
+                "is a path to correct rather than a set to judge",
                 UNREADABLE,
             )
         found = read(inputs)
