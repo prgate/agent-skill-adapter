@@ -8,6 +8,7 @@ a repository happened to give the folder.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -241,6 +242,37 @@ def test_a_folder_that_is_no_skill_beside_the_skills_is_a_row_and_not_a_refusal(
     assert only(read, assets.Kind.SKILL).name == "alpha"
     said = {finding.found_as for asset in read for finding in asset.findings if not finding.ids}
     assert "scratch/" in said
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 0o111 does not stop root from listing")
+def test_a_skill_folder_not_listable_beside_the_skills_is_a_row_and_not_a_refusal(
+    tmp_path: Path,
+) -> None:
+    """ADR-0012: a skill found under a named `--skills` folder is not the path named directly.
+
+    `alpha` traversable but not listable (``chmod 0o111``) fails the `_listed` this function
+    used to call unconditionally on every skill folder it reads, `--skills` or not -- raising
+    past every caller and losing `beta` beside it. A row for what could not be listed inside
+    `alpha` instead, and both skills still convert -- `alpha`'s own header is readable by
+    name even when its directory cannot be listed.
+    """
+    root = build(tmp_path)
+    (root / "bundles" / "beta" / "notes").mkdir(parents=True)
+    (root / "bundles" / "beta" / "SKILL.md").write_text(
+        SKILL.replace("name: alpha", "name: beta"), encoding="utf-8"
+    )
+    (root / "bundles" / "alpha").chmod(0o111)
+
+    inputs = assets.Inputs(translation=rules_for(tmp_path), skills=(root / "bundles",))
+    try:
+        read = assets.read(inputs)
+    finally:
+        (root / "bundles" / "alpha").chmod(0o755)
+
+    skills = {asset.name for asset in read if asset.kind is assets.Kind.SKILL and asset.name}
+    assert skills == {"alpha", "beta"}
+    said = {finding.found_as for asset in read for finding in asset.findings if not finding.ids}
+    assert "alpha/" in said
 
 
 def test_a_markdown_file_that_is_no_subagent_beside_the_subagents_is_a_row_and_not_a_refusal(

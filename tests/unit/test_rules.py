@@ -96,6 +96,24 @@ def test_an_undocumented_file_gets_one_rule_carrying_what_to_do_and_what_to_say(
     assert loaded.undocumented.note.strip() != ""
 
 
+def test_a_rules_file_that_is_not_utf8_is_refused_not_raised(tmp_path: Path) -> None:
+    """Documented exit code 6 ("an input was not read") needs an `InvalidRules` to carry it.
+
+    `read_text(encoding="utf-8")` raises `UnicodeDecodeError`, a `ValueError` rather than the
+    `OSError` the CLI already catches -- unhandled here, it would reach the caller as a
+    traceback and exit 1, the code for a transfer with known losses, instead of 6.
+    """
+    path = tmp_path / "broken.yaml"
+    path.write_bytes(b'rules_version: "1.0"\nundocumented:\n  action: copy\n  note: \xff\n')
+
+    try:
+        rules.load(path)
+    except rules.InvalidRules as error:
+        assert str(path) in str(error)
+    else:  # pragma: no cover - the assertion below reports the miss
+        raise AssertionError("a non-UTF-8 rules file was accepted")
+
+
 def test_a_rules_file_missing_its_version_is_refused(tmp_path: Path) -> None:
     """The version is what a repeated transfer is compared against; without it, no rules."""
     path = tmp_path / "broken.yaml"

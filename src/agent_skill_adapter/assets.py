@@ -249,7 +249,7 @@ def _skills_in(folder: Path, rules: Rules) -> list[Asset]:
         if rules.ignored(entry.name):
             notes.append(Finding(_named(entry, folder), (), DROPPED))
         elif entry.is_dir() and (entry / SKILL_MD).is_file():
-            found.append(_skill(entry, rules))
+            found.append(_skill(entry, rules, top=folder))
         else:
             # A folder with no skill file in it is a folder somebody keeps beside their
             # skills, and refusing the run over it would lose the skills that are there. A
@@ -294,8 +294,14 @@ def _header(file: Path, prefix: str) -> tuple[dict[str, Any], list[Finding]]:
     return front, findings
 
 
-def _skill(folder: Path, rules: Rules) -> Asset:
-    """One skill folder: its header, what it bundles, the hooks it declares, what is dropped."""
+def _skill(folder: Path, rules: Rules, top: Path | None = None) -> Asset:
+    """One skill folder: its header, what it bundles, the hooks it declares, what is dropped.
+
+    ``top`` is the folder the caller named directly -- ``folder`` itself for a `--skill`
+    read directly (the default), or the `--skills` folder it was found inside. ADR-0012: a
+    folder unreadable is a refusal only when it is ``top``; found on the walk, it is a row
+    on this one skill instead, and every other skill of the set still converts.
+    """
     file = folder / SKILL_MD
     if not file.is_file():
         raise ReadError(f"{folder}: no {SKILL_MD} here, so this is not a skill folder")
@@ -303,7 +309,9 @@ def _skill(folder: Path, rules: Rules) -> Asset:
     findings = [
         Finding(f"frontmatter key `{key}`", (f"{SKILL_FRONTMATTER}{key}",)) for key in front
     ]
-    held = [entry for entry in _listed(folder) if not rules.ignored(entry.name)]
+    notes: list[Finding] = []
+    listed = _listed_below(folder, folder if top is None else top, notes)
+    held = [entry for entry in listed if not rules.ignored(entry.name)]
     findings += [
         Finding(f"bundled directory `{entry.name}/`", (f"{SKILL_DIR}{entry.name}",))
         for entry in held
@@ -329,7 +337,12 @@ def _skill(folder: Path, rules: Rules) -> Asset:
         )
         for event in events
     ]
-    findings += _dropped(folder, rules)
+    findings += notes
+    if not notes:
+        # `_dropped` lists ``folder`` itself again as its own walk's starting point; asking
+        # it to when `listed` above already found that unreadable would raise the very
+        # refusal this function exists to turn into a row.
+        findings += _dropped(folder, rules)
     findings += [Finding(f"frontmatter of `{file.name}`", (), line) for line in rewritten]
     return Asset(Kind.SKILL, folder, folder.name, front, tuple(findings))
 

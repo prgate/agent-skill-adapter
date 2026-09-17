@@ -92,7 +92,14 @@ def load(path: str | Path) -> Rules:
     """Read the YAML rules at ``path`` and return them as :class:`Rules`."""
     file = Path(path)
     try:
-        raw = yaml.safe_load(file.read_text(encoding="utf-8"))
+        text = file.read_text(encoding="utf-8")
+    except UnicodeDecodeError as error:
+        # Not an `OSError`: the file opened, and what failed is decoding its bytes. Left
+        # uncaught, this is a traceback and exit 1 rather than the documented exit 6 for an
+        # input that was not read (AGENTS.md).
+        raise InvalidRules(f"{file}: not valid UTF-8 ({error})") from error
+    try:
+        raw = yaml.safe_load(text)
     except yaml.YAMLError as error:
         raise InvalidRules(f"{file}: not valid YAML: {error}") from error
     if not isinstance(raw, dict):

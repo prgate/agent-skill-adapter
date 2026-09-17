@@ -758,6 +758,38 @@ def test_an_invalid_name_inside_a_named_skills_folder_is_a_row_the_rest_of_the_s
     assert not (out / ".agents/skills/Uppercase-antigravity").exists()
 
 
+def test_a_name_that_overflows_once_suffixed_inside_a_skills_folder_is_a_row_too(
+    tmp_path: Path,
+) -> None:
+    """ADR-0012 covers the assembled name too, not only the frontmatter one.
+
+    A name valid on its own (60 characters) but too long once suffixed with the target's own
+    ``-antigravity`` earns a row on this one skill of a `--skills` folder, not a refusal of
+    the whole read: `_assembled_name` used to be called outside the guard `_skill_name`
+    already had, so the same overflow lost `good` beside it.
+    """
+    root = assembly_tree(tmp_path)
+    bundles = tmp_path / "bundles"
+    long_name = "a" * 60
+    skill(bundles / long_name, f"name: {long_name}\n")
+    skill(bundles / "good", "name: good\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=TRANSLATION, skills=(bundles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert result.exit_code != 6
+    names = {asset["name"] for asset in result.report["assets"]}
+    assert names == {long_name, "good"}
+    assert (out / ".agents/skills/good-antigravity/SKILL.md").is_file()
+
+
 def test_a_name_that_only_overflows_once_the_target_suffix_is_appended_is_refused(
     tmp_path: Path,
 ) -> None:
@@ -2406,6 +2438,27 @@ def test_standard_output_carries_the_json_report_and_nothing_else(tmp_path: Path
     assert json.loads(into_file.read_text(encoding="utf-8")) == json.loads(piped.stdout)
 
 
+def test_a_translation_rules_file_that_is_not_utf8_exits_6_not_1(tmp_path: Path) -> None:
+    """Documented exit code 6 ("an input was not read") needs `rules.load` to answer a
+    non-UTF-8 file with `InvalidRules`, which is what the CLI already catches (AGENTS.md).
+
+    Left as a raw `UnicodeDecodeError`, it passes straight through that handler and exits 1,
+    the code for a transfer with known losses -- with a traceback on standard error instead
+    of the machine-readable report every outcome of this command promises (FR-26).
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    broken = tmp_path / "broken.yaml"
+    broken.write_bytes(b'rules_version: "1.0"\nundocumented:\n  action: copy\n  note: \xff\n')
+
+    result = runner.invoke(app, [*cli_arguments(folder, root), "--translation", str(broken)])
+
+    assert result.exit_code == 6
+    issued = json.loads(result.stdout)
+    assert issued["exit_code"] == 6
+    assert str(broken) in issued["error"]
+
+
 def test_a_report_that_cannot_be_written_is_still_issued_and_says_so(tmp_path: Path) -> None:
     """`--report` into a folder that is not there: the report goes to standard output instead.
 
@@ -3350,6 +3403,56 @@ def test_a_rule_file_the_target_names_a_root_for_does_not_cost_the_run_its_verdi
     assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
     assert rows(result.report)["rules.project"]["target_says"] == ".agents/rules/"
     assert (out / ".agents/rules/tone.md").exists()
+
+
+def test_a_rule_file_of_a_plugin_is_judged_by_where_it_actually_lands(tmp_path: Path) -> None:
+    """R19/G02 inside a plugin: the row must name the place the file is written to.
+
+    `_root_of` already sends a plugin's rule file to `plugin.dir.rules` rather than
+    `rules.project`/`rules.user` once a manifest names it a plugin; `_about_its_place`,
+    judging the very same file, did not know that and asked `rules.project` regardless --
+    a row naming a place the file never went to.
+    """
+    root = destinations_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"kind": "subagent-field", "id": entry, "support": "supported"}
+            for entry in SUBAGENT_FIELDS
+        ],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+            {"id": "rules.project", "path": ".agents/rules/"},
+            {"id": "plugins.project", "path": "<workspace-root>/.agents/plugins/"},
+            {"id": "plugin.file", "path": "<plugin-name>/plugin.json"},
+            {"id": "plugin.dir.rules", "path": "<plugin-name>/rules/"},
+        ],
+    )
+    parts = a_set_on_disk(tmp_path)
+    plugin_json = tmp_path / "kit" / "plugin.json"
+    plugin_json.parent.mkdir(parents=True, exist_ok=True)
+    plugin_json.write_text(json.dumps({"name": "kit"}), encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=(parts["policy"] / "tone.md",), plugin=plugin_json),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    rules_asset = next(a for a in result.report["assets"] if a["kind"] == "rules-file")
+    ids = {entry["id"] for entry in rules_asset["properties"]}
+    assert ids >= {"plugin.dir.rules"}
+    assert "rules.project" not in ids
+    place = next(e for e in rules_asset["properties"] if e["id"] == "plugin.dir.rules")
+    assert place["outcome"] == "reproduced" and place["verdict"] == "clean"
+    assert (out / ".agents/plugins/kit/rules/tone.md").exists()
 
 
 def test_install_refuses_a_destination_that_leads_out_of_the_home_and_the_workspace(

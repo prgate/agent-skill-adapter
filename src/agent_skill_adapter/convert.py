@@ -459,11 +459,18 @@ unanswered is the honest whole of what happens to it.
 """
 
 
-def _about_its_place(entry_id: str, kind: Kind, scope: Scope) -> str:
-    """``entry_id``, or the id of the place the target names, where that is the question."""
+def _about_its_place(entry_id: str, kind: Kind, scope: Scope, plugin: str | None) -> str:
+    """``entry_id``, or the id of the place the target names, where that is the question.
+
+    A composition that names a manifest crosses as a plugin, and every root moves inside its
+    folder (`_root_of`) -- a rule file among them, judged by `plugin.dir.rules` rather than
+    by `rules.project`/`rules.user` once it is a plugin's, or the row would name a place the
+    file was never headed for.
+    """
     if ASKS_ITS_PLACE.get(kind) != entry_id:
         return entry_id
-    return ROOT_ENTRY[kind][scope]
+    inside = PLUGIN_INSIDE.get(kind) if plugin is not None else None
+    return ROOT_ENTRY[kind][scope] if inside is None else inside
 
 
 def _judge(
@@ -473,6 +480,7 @@ def _judge(
     translation: Rules,
     kind: Kind,
     scope: Scope,
+    plugin: str | None,
 ) -> tuple[list[Property], list[str]]:
     """Every finding against the comparison, once per entry id, plus the advice it earns.
 
@@ -496,7 +504,7 @@ def _judge(
     rewritten: list[str] = []
     for finding in findings:
         for entry_id in finding.ids:
-            asked_by.setdefault(_about_its_place(entry_id, kind, scope), []).append(
+            asked_by.setdefault(_about_its_place(entry_id, kind, scope, plugin), []).append(
                 finding.found_as
             )
         if finding.ids:
@@ -963,7 +971,7 @@ def _manifest(
     ]
     beside = _beside_a_manifest(asset, target)
     findings += [Finding(f"`{name}` beside the manifest", (entry_id,)) for entry_id, name in beside]
-    rows, advice = _judge(findings, gaps, target, translation, asset.kind, scope)
+    rows, advice = _judge(findings, gaps, target, translation, asset.kind, scope, plugin)
     return rows, [*advice, *(f"`{name}` {READ_BEFORE_ENABLING}" for _, name in beside)]
 
 
@@ -2860,7 +2868,9 @@ def _assess(
     and carries no name of its own to be assembled under; what it holds is placed by the
     rule the translation states for an undeclared file.
     """
-    properties, advice = _judge(asset.findings, gaps, target, translation, asset.kind, scope)
+    properties, advice = _judge(
+        asset.findings, gaps, target, translation, asset.kind, scope, plugin
+    )
     valued, said, applied = _translated(asset, target, translation)
     properties += valued
     advice += said
@@ -2885,6 +2895,12 @@ def _assess(
     elif asset.kind is Kind.SKILL:
         try:
             name = _skill_name(asset.path, asset.frontmatter)
+            # The whole skill having nowhere to go, and one part of it left behind, are
+            # asked in that order and never both: a target that names no root has nothing
+            # to say about where the parts inside it would have gone either.
+            stayed = _nowhere(target, asset.kind, scope, plugin)
+            if not stayed:
+                assembled = _assembled_name(name, target.environment)
         except ConvertError as error:
             if Path(os.path.abspath(asset.path)) in named_directly:
                 # ADR-0012: a refusal is about the path the caller named, and this is it --
@@ -2892,18 +2908,14 @@ def _assess(
                 # found on its own. Re-raised whole, and caught by `convert`'s own refusal.
                 raise
             # Found inside a folder the caller named rather than named itself, so an invalid
-            # name is a fault of this one skill and not of the folder it was found in:
-            # refusing the whole `--skills` read over it would lose every skill beside it
-            # that named itself correctly. A row instead, the same price a target with no
-            # root for skills at all already pays below.
+            # name -- the frontmatter's own, or that same name once suffixed with the
+            # target's environment -- is a fault of this one skill and not of the folder it
+            # was found in: refusing the whole `--skills` read over it would lose every
+            # skill beside it that named itself correctly. A row instead, the same price a
+            # target with no root for skills at all already pays below.
             stayed = [str(error)]
         else:
-            # The whole skill having nowhere to go, and one part of it left behind, are
-            # asked in that order and never both: a target that names no root has nothing
-            # to say about where the parts inside it would have gone either.
-            stayed = _nowhere(target, asset.kind, scope, plugin)
             if not stayed:
-                assembled = _assembled_name(name, target.environment)
                 stayed = _unregistered_hook(target, scope, properties, _hooks_of(asset))
                 unplaced = bool(_placeless(target, properties))
     elif asset.kind is Kind.MANIFEST:
