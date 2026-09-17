@@ -1833,6 +1833,50 @@ def _hook_part(out: Path, destination: str, carried: Mapping[str, Any]) -> _Part
     )
 
 
+_HOOK_ENTRY_LABEL = f"frontmatter key `{HOOKS_KEY}`"
+"""The label `_hook_part` gives every staged hook entry, and the one `_merged_hooks` looks for.
+
+Spelled once because it names the one shape `_merged_hooks` treats specially -- a second
+spelling drifting from `_hook_part`'s own would leave that function matching nothing and two
+skills' hook entries silently back to colliding on the one file they share.
+"""
+
+
+def _merged_hooks(parts: Sequence[_Part]) -> list[_Part]:
+    """Every hook entry staged at the one file the target registers hooks in, collapsed to one.
+
+    Two skills of one set that both declare ``hooks:`` are staged at the same destination --
+    the target names one file for the whole workspace, not one per skill -- and that is not a
+    collision `_assemble` should refuse: FR-40 is about a file this run does not edit because
+    it may already hold someone else's entries, not about two parts of its own plan landing on
+    the file it is about to create. Left as two parts, the second write would replace the
+    first and `_assemble` would refuse the whole run over a path it staged itself. Merged here
+    instead, by event, the same way two events inside one skill's own header already merge in
+    `_hooks_the_target_fires` -- an event both skills declare keeps both skills' entries.
+    """
+    merged: dict[Path, _Part] = {}
+    order: list[Path] = []
+    rest: list[_Part] = []
+    for part in parts:
+        if part.label != _HOOK_ENTRY_LABEL or part.content is None:
+            rest.append(part)
+            continue
+        carried = json.loads(part.content)[HOOKS_KEY]
+        earlier = merged.get(part.staged)
+        if earlier is None:
+            merged[part.staged] = part
+            order.append(part.staged)
+            continue
+        before = json.loads(earlier.content)[HOOKS_KEY]  # type: ignore[arg-type]
+        combined = {**before}
+        for event, entries in carried.items():
+            combined[event] = combined.get(event, []) + entries
+        merged[part.staged] = replace(
+            earlier, content=json.dumps({HOOKS_KEY: combined}, indent=2, ensure_ascii=False) + "\n"
+        )
+    return rest + [merged[staged] for staged in order]
+
+
 def _links_on_the_way(root: Path, staged: Path) -> None:
     """Refuse a symbolic link at any level of ``staged`` below ``root``, the last one included.
 
@@ -2134,15 +2178,23 @@ def _relinked(
     said: list[str] = []
     for part in parts:
         source = part.copied_from
-        # A directory crosses whole and a link crosses as a link: neither is a file this run
-        # holds the text of, and reading through either is the one thing `_assemble` is
-        # careful not to do.
-        if (
-            source is None
-            or source.is_dir()
-            or source.is_symlink()
-            or not inputs.translation.rewritable(part.label)
-        ):
+        # A bundled directory crosses whole (`_assemble` copies it with `shutil.copytree`),
+        # so it holds no text of its own to rewrite -- but a Markdown file inside it does,
+        # and nothing else here ever opens one. Overlaid beside the directory's own copy
+        # rather than skipped with it, so a link inside a bundled directory is repointed
+        # exactly as one beside the skill file already is.
+        if source is not None and source.is_dir() and not source.is_symlink():
+            overlays, over_pointed, over_said = _bundled_overlays(
+                part, source, placed, named, inputs.translation
+            )
+            settled.append(part)
+            settled += overlays
+            pointed += over_pointed
+            said += over_said
+            continue
+        # A link crosses as a link: not a file this run holds the text of, and reading
+        # through it is the one thing `_assemble` is careful not to do.
+        if source is None or source.is_symlink() or not inputs.translation.rewritable(part.label):
             settled.append(part)
             continue
         text = part.content if part.content is not None else _text_of(source)
@@ -2155,6 +2207,68 @@ def _relinked(
         # one thing `_relink` cannot know, and the one thing a reader needs first.
         said += [f"`{part.label}` {reason}" for reason in reasons]
     return settled, pointed, said
+
+
+def _bundled_overlays(
+    part: _Part,
+    source: Path,
+    placed: Mapping[Path, Path],
+    named: Sequence[Path],
+    translation: Rules,
+) -> tuple[list[_Part], list[dict[str, str]], list[str]]:
+    """Every rewritable file inside a bundled directory, relinked and staged beside its copy.
+
+    A bundled directory is one part of the plan and `_assemble` copies it whole, so nothing
+    else in this module ever opens a file living inside it. `_repointed` already resolves an
+    address that points into or out of such a directory, by the nearest ancestor it finds in
+    ``placed``; the piece missing is opening the file itself, which this does exactly as the
+    loop above opens one found beside the skill file. Left unopened, a broken link inside a
+    bundled directory would cross the same way a broken link anywhere else in the set is the
+    one thing this module exists against -- only unreported, because nothing here had read it.
+
+    Staged at ``part.staged / <relative path>`` -- inside the directory `_assemble` is about
+    to copy whole -- so the write that follows overwrites the one copytree already made,
+    rather than landing beside it as a second, unrelated file.
+    """
+    overlays: list[_Part] = []
+    pointed: list[dict[str, str]] = []
+    said: list[str] = []
+    for found in sorted(source.rglob("*")):
+        if not found.is_file() or found.is_symlink():
+            continue
+        relative = found.relative_to(source).as_posix()
+        if translation.ignored(relative) or not translation.rewritable(relative):
+            continue
+        staged = part.staged / relative
+        changed, rewrites, reasons = _relink(
+            _text_of(found), found.parent, staged.parent, placed, named
+        )
+        label = f"{part.label}{relative}"
+        said += [f"`{label}` {reason}" for reason in reasons]
+        if not rewrites:
+            continue
+        destination = f"{part.destination}{relative}"
+        overlays.append(_Part(label, destination, staged, part.root, content=changed))
+        pointed += [{"path": str(staged), "from": was, "to": became} for was, became in rewrites]
+    return overlays, pointed, said
+
+
+def _overlays(part: _Part, earlier: _Part) -> bool:
+    """Whether ``part`` is `_bundled_overlays`'s own relinked copy of a file ``earlier`` stages.
+
+    Read off the two parts alone, never off which function produced them: a part with
+    written content of its own and no source of its own (`_bundled_overlays` writes such a
+    part; nothing else in this module does) that lands inside a directory `earlier` is about
+    to copy whole is the one shape this module ever stages on purpose two deep -- an
+    unrelated pair sharing a path by accident never has both halves of it.
+    """
+    return (
+        part.content is not None
+        and part.copied_from is None
+        and earlier.copied_from is not None
+        and earlier.copied_from.is_dir()
+        and part.staged.is_relative_to(earlier.staged)
+    )
 
 
 def _lands_at(part: _Part, *, installing: bool) -> Path:
@@ -2287,18 +2401,24 @@ def _assemble(
     # ponytail: every part against every other, which is a handful against a handful. The way
     # up, if a plan ever grows, is to sort the destinations and compare each with the one
     # before it, where containment can only be with the neighbour.
-    planned: dict[Path, str] = {}
+    planned: dict[Path, _Part] = {}
     for part in parts:
-        for place, label in planned.items():
+        for place, earlier in planned.items():
+            if _overlays(part, earlier):
+                # `_bundled_overlays` stages a relinked file exactly where the directory
+                # part it belongs to is about to be copied whole -- on purpose, so the
+                # write below replaces the copytree's own unrewritten copy of it. The one
+                # shape this loop is not the collision it exists to catch.
+                continue
             if place.is_relative_to(part.staged) or part.staged.is_relative_to(place):
                 raise ConvertError(
-                    f"`{label}` is to be written at {place} and `{part.label}` at "
+                    f"`{earlier.label}` is to be written at {place} and `{part.label}` at "
                     f"{part.staged}, which is the same place or one inside the other; "
                     "nothing was written, because whichever of the two went second would "
                     "replace the other while the report called both of them carried over",
                     COLLISION,
                 )
-        planned[part.staged] = part.label
+        planned[part.staged] = part
     # A link is named as one, at the level it stands: it is the one occupied place that does
     # not look occupied to whoever reads the folder, and a refusal that called it a file
     # would send them looking for something that is not there.
@@ -2889,9 +3009,15 @@ def convert(
                 )
                 parts += planned
                 advice += asked
+            # Two skills that both declare `hooks:` are staged at the one file the target
+            # names for the whole workspace, and merging them is not the collision the plan
+            # is checked whole for below -- it is the one shape `_merged_hooks` is allowed to
+            # resolve rather than refuse.
+            parts = _merged_hooks(parts)
             # One plan for the whole set, checked whole before the first byte: two skills of
-            # one set aimed at one destination is the same collision as two parts of one
-            # skill, and a check made per entity would not see it.
+            # one set aimed at one destination -- apart from that one merged shape -- is the
+            # same collision as two parts of one skill, and a check made per entity would not
+            # see it.
             # After the whole plan and before the first byte of it: an address is rewritten
             # against where the file it names lands, and that is not known until every entity
             # has contributed its parts.

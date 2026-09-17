@@ -1227,6 +1227,37 @@ def test_only_a_hook_the_target_fires_is_staged_and_the_report_says_where_it_bel
     assert any(".agents/hooks.json" in line for line in result.report["advice"])
 
 
+def test_two_skills_hooks_merge_into_the_one_file_the_target_names(tmp_path: Path) -> None:
+    """Two skills of one set both declare ``hooks:`` and both are staged at ``hooks.json``.
+
+    The target names one file for the whole workspace, not one per skill, so this is not the
+    collision `_assemble` refuses the plan over: it is a merge, exactly as two events inside
+    one skill's own header already merge. A run that refused it would write nothing of a set
+    where nothing else was wrong.
+    """
+    root = hooks_tree(tmp_path)
+    bundles = tmp_path / "set" / "bundles"
+    skill(bundles / "alpha", "name: alpha\nhooks:\n  PreToolUse:\n    - alpha.sh\n")
+    skill(bundles / "beta", "name: beta\nhooks:\n  PreToolUse:\n    - beta.sh\n")
+    out = tmp_path / "out"
+
+    convert_set(
+        Inputs(translation=TRANSLATION, skills=(bundles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert (out / ".agents/skills/alpha-antigravity/SKILL.md").is_file()
+    assert (out / ".agents/skills/beta-antigravity/SKILL.md").is_file()
+    staged = out / "hooks.json"
+    assert json.loads(staged.read_text(encoding="utf-8")) == {
+        "hooks": {"PreToolUse": ["alpha.sh", "beta.sh"]}
+    }
+
+
 def test_a_hook_the_target_fires_and_names_no_file_for_is_not_dropped_in_silence(
     tmp_path: Path,
 ) -> None:
@@ -2742,6 +2773,83 @@ def test_an_address_of_a_moved_file_points_at_where_this_run_put_it(tmp_path: Pa
     assert [(entry["from"], entry["to"]) for entry in result.report["links"]] == [
         ("../policy/tone.md", "../rules/tone.md")
     ]
+
+
+def test_a_link_inside_a_bundled_directory_is_repointed_too(tmp_path: Path) -> None:
+    """`SKILL.md`'s own link moves and so does one inside a directory bundled beside it.
+
+    A bundled directory crosses whole (`shutil.copytree`), and nothing else in `_relinked`
+    ever opens a file inside one -- so a link written in ``references/deep.md`` was never
+    read, let alone repointed, while the very same link in `SKILL.md` already was. Both name
+    the one rule file this run moves, from two different depths, and both must land pointed
+    at where it went.
+    """
+    root = tmp_path / "specs"
+    write(
+        root,
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+        ],
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+            {
+                "id": "rules.frontmatter.trigger",
+                "kind": "settings-file",
+                "support": "supported",
+                "values": ["always_on", "model_decision"],
+            },
+        ],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skill.dir.references", "path": "<skill-name>/references/"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+            {"id": "rules.project", "path": ".agents/rules/"},
+        ],
+    )
+    rule = tmp_path / "set" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("Be brief.\n", encoding="utf-8")
+    folder = skill(
+        tmp_path / "set" / "skills" / "gamma", "name: gamma\n", directories=("references",)
+    )
+    (folder / "SKILL.md").write_text(
+        "---\ndescription: what it does\nname: gamma\n---\n\nFollow [tone](../../tone.md).\n",
+        encoding="utf-8",
+    )
+    (folder / "references" / "deep.md").write_text(
+        "Follow [tone](../../../tone.md).\n", encoding="utf-8"
+    )
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, skill=(folder,), rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    skill_md = (out / ".agents/skills/gamma-antigravity/SKILL.md").read_text(encoding="utf-8")
+    deep_md = (out / ".agents/skills/gamma-antigravity/references/deep.md").read_text(
+        encoding="utf-8"
+    )
+    assert "../../rules/tone.md" in skill_md
+    assert "../../../rules/tone.md" in deep_md
+    assert [(entry["from"], entry["to"]) for entry in result.report["links"]] == [
+        ("../../tone.md", "../../rules/tone.md"),
+        ("../../../tone.md", "../../../rules/tone.md"),
+    ]
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
 
 
 def test_an_address_of_a_file_that_stayed_where_it_was_is_left_exactly_as_written(
