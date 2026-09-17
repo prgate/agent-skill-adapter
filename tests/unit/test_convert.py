@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -14,15 +14,52 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
+from agent_skill_adapter import convert as convert_module
+from agent_skill_adapter.assets import Asset, Finding, Inputs, Kind
 from agent_skill_adapter.cli.main import app
-from agent_skill_adapter.convert import WORKAROUNDS, Scope, Verdict, convert
+from agent_skill_adapter.convert import WORKAROUNDS, Conversion, Scope, Verdict
+from agent_skill_adapter.convert import convert as convert_set
 from agent_skill_adapter.envspec.model import EnvSpec
+from agent_skill_adapter.rules import Rules
 
 runner = CliRunner()
 
 TODAY = date(2026, 9, 14)
 SOURCE = "anthropic/claude-code@1.0.0"
 TARGET = "google/antigravity@1.0.0"
+
+TRANSLATION = Rules.model_validate(
+    {
+        "rules_version": "1.0",
+        "ignore": ["__pycache__", "*.py[co]"],
+        "undocumented": {"action": "copy", "note": "nothing declares this file"},
+    }
+)
+"""The translation rules every run here is given: the smallest ones that are valid."""
+
+COMMAND = "---\ndescription: does the thing\n---\n\nDo the thing.\n"
+"""One command file. It opens with a header, which is what makes it an entity of its folder.
+
+A command of the source environment may be written without one and still work there; a file
+without one is read here as a path nobody declared, because nothing in it says it is a
+command rather than a note left beside them.
+"""
+
+
+def convert(
+    skill_dir: str | Path, source: str | None, target: str | None, **named: Any
+) -> Conversion:
+    """One skill folder, which is a composition of one part -- what the command line passes.
+
+    The seam takes a set; the cases below are about one skill each, and a set of one is how
+    they say so. A case about a composition of several parts passes `convert_set` directly.
+    """
+    return convert_set(
+        Inputs(translation=TRANSLATION, skill=(Path(os.path.abspath(skill_dir)),)),
+        source,
+        target,
+        **named,
+    )
 
 
 def write(
@@ -82,11 +119,21 @@ def skill(folder: Path, frontmatter: str, *, directories: tuple[str, ...] = ()) 
     return folder
 
 
+def rows(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Every row of every entity of the report, by the entry id it asked about."""
+    return {
+        entry["id"]: entry
+        for asset in report["assets"]
+        for entry in asset["properties"]
+        if entry["id"] is not None
+    }
+
+
 def properties(report: dict[str, Any]) -> dict[str, tuple[str, str, str]]:
     """Every property of the report as id -> (outcome, origin, verdict)."""
     return {
-        entry["id"]: (entry["outcome"], entry["origin"], entry["verdict"])
-        for entry in report["properties"]
+        entry_id: (entry["outcome"], entry["origin"], entry["verdict"])
+        for entry_id, entry in rows(report).items()
     }
 
 
@@ -157,7 +204,7 @@ def test_the_assembly_table_turns_each_outcome_into_a_verdict(tmp_path: Path) ->
     assert result.verdict is Verdict.UNDECIDABLE
     assert result.exit_code == 3
     assert result.report["outcome"] == "undecidable"
-    assert result.report["report_schema"] == 1
+    assert result.report["report_schema"] == 2
 
 
 def test_a_skill_the_target_reproduces_converts_without_loss(tmp_path: Path) -> None:
@@ -186,7 +233,7 @@ def test_a_property_no_description_declares_is_reported_not_dropped(tmp_path: Pa
     folder = skill(tmp_path / "example", "name: example\ntelepathy: on\n", directories=("sandbox",))
 
     result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
-    rows = {entry["id"]: entry for entry in result.report["properties"]}
+    found = rows(result.report)
 
     assert properties(result.report) == {
         "skill.frontmatter.name": ("reproduced", "extension", "clean"),
@@ -194,115 +241,55 @@ def test_a_property_no_description_declares_is_reported_not_dropped(tmp_path: Pa
         "skill.frontmatter.telepathy": ("unknown", "extension", "lossy"),
         "skill.dir.sandbox": ("unknown", "extension", "lossy"),
     }
-    assert rows["skill.frontmatter.telepathy"]["found_as"] == "frontmatter key `telepathy`"
-    assert rows["skill.dir.sandbox"]["found_as"] == "bundled directory `sandbox/`"
-    assert rows["skill.dir.sandbox"]["note"]
+    assert found["skill.frontmatter.telepathy"]["found_as"] == "frontmatter key `telepathy`"
+    assert found["skill.dir.sandbox"]["found_as"] == "bundled directory `sandbox/`"
+    assert found["skill.dir.sandbox"]["note"]
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
 
-def nested(levels: int) -> bytes:
-    """A frontmatter whose one key nests `levels` mappings deep and is valid YAML throughout."""
-    rungs = "".join(f"{'  ' * (level + 1)}k{level}:\n" for level in range(levels))
-    header = (
-        f"name: example\ndescription: what it does\nnest:\n{rungs}{'  ' * (levels + 1)}leaf: x\n"
-    )
-    return f"---\n{header}---\n\nBody.\n".encode()
-
-
-BROKEN: dict[str, bytes | None] = {
-    "no-skill-file": None,
-    "unclosed-frontmatter": b"---\nname: example\n\nBody, and no closing line.\n",
-    "invalid-yaml": b"---\nname: [unclosed\n---\n\nBody.\n",
-    "duplicate-key": b"---\nname: one\nname: two\ndescription: what it does\n---\n\nBody.\n",
-    "duplicate-normalized-key": b"---\ndescription: what it does\nhooks:\n  PreToolUse:\n"
-    b"    2026-09-14: from-date-key\n    '2026-09-14': from-string-key\n---\n\nBody.\n",
-    "duplicate-written-key": b"---\ndescription: what it does\nhooks:\n  PreToolUse:\n"
-    b"    1: from-int-key\n    '1': from-string-key\n---\n\nBody.\n",
-    "unhashable-key": b"---\ndescription: what it does\n? [a, b]\n: v\n---\n\nBody.\n",
-    "unstable-set": b"---\ndescription: what it does\nhooks: !!set {alpha, beta}\n---\n\nBody.\n",
-    "unstable-bytes": b"---\ndescription: what it does\nseed: !!binary aGk=\n---\n\nBody.\n",
-    "nonfinite-nan": b"---\ndescription: what it does\nweight: .nan\n---\n\nBody.\n",
-    "nonfinite-infinity": b"---\ndescription: what it does\nweight: .inf\n---\n\nBody.\n",
-    "nonfinite-negative-infinity": b"---\ndescription: what it does\nweight: -.inf\n---\n\nBody.\n",
-    "byte-order-mark": b"\xef\xbb\xbf---\nname: example\ndescription: d\n---\n\nBody.\n",
-    "no-opening-line": b"name: example\ndescription: what it does\n---\n\nBody.\n",
-    "not-a-mapping": b"---\n- name: example\n- description: what it does\n---\n\nBody.\n",
-    "not-utf-8": b"---\nname: \xff\ndescription: what it does\n---\n\nBody.\n",
-    "anchor-and-alias": b"---\nname: &n example\ndescription: *n\n---\n\nBody.\n",
-    "oversize": b"---\nname: example\ndescription: " + b"x" * 200_000 + b"\n---\n\nBody.\n",
-    "too-deep": nested(40),
-    "no-description": b"---\nname: example\n---\n\nBody.\n",
-    "file-too-large": b"---\nname: example\ndescription: what it does\n---\n\n"
-    + b"x" * 1024 * 1024,
-}
-"""Twenty-one ways a skill file is not one. Each must stop the run rather than be read halfway.
-
-A set and a block of bytes are here because neither has a text it always reads back as: the
-same header would put different bytes in the assembled file on every run, and a converter
-whose output moves on a fixed input cannot be checked against anything. `.nan`, `.inf` and
-`-.inf` are here for the other half of the same rule: JSON has no such number, and
-`json.dumps` writes them as a bare `NaN` or `Infinity` that a strict reader refuses -- the
-file would leave here looking assembled and arrive as something the target cannot load.
-"""
-
-
-@pytest.mark.parametrize("case", sorted(BROKEN))
-def test_a_folder_that_is_not_a_skill_stops_the_run_and_still_reports(
-    tmp_path: Path, case: str
+def test_a_folder_that_could_not_be_read_stops_the_run_and_still_reports(
+    tmp_path: Path,
 ) -> None:
-    """Exit code 6, no properties, and a report that names the file it could not read.
+    """Exit code 6, no entity judged, and a report that names the folder it could not read.
 
-    A duplicate key is here because PyYAML keeps the last of the two without a word: read
-    and not refused, the frontmatter would convert as a value nobody chose. Two keys that
-    become one only once the header is carried across are the same duplicate, made by this
-    command rather than by the person, and are refused the same way. An anchor and
-    its alias are the same defect in another spelling -- what a reader sees in the file and
-    what the parser builds stop being the same text (FR-15). A header without `description`
-    is a missing required field, which FR-16 counts as a structural break and not as an
-    optional field left out; `name` is not in that company, and the test below says so.
+    What makes a skill file unreadable is the reading's own business and is pinned where the
+    reading lives (`tests/unit/test_assets.py`); what is pinned here is the answer this
+    command gives for it -- a report and a code, never a traceback.
     """
     root = four_row_tree(tmp_path)
     folder = tmp_path / "example"
     folder.mkdir()
-    content = BROKEN[case]
-    if content is not None:
-        (folder / "SKILL.md").write_bytes(content)
 
     result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
 
     assert result.exit_code == 6
     assert result.verdict is Verdict.UNDECIDABLE
-    assert result.report["properties"] == []
-    assert result.report["report_schema"] == 1
+    assert result.report["assets"] == []
+    assert result.report["report_schema"] == 2
     assert str(folder) in result.report["error"]
+    # The folder is there and holds no skill file, so that is what the refusal says. The
+    # case below is the other one, and the two must not answer in each other's words.
+    assert "SKILL.md" in result.report["error"]
 
 
-def test_two_header_keys_that_carry_across_as_one_are_both_named(tmp_path: Path) -> None:
-    """A date key and the quoted text of it are two keys in the file and one after carrying.
+def test_a_path_that_is_not_there_is_refused_as_a_path_and_not_as_a_missing_skill_file(
+    tmp_path: Path,
+) -> None:
+    """A path nobody has is a path to correct, and the refusal says so in those words.
 
-    Whichever of the two values is dropped, dropping it silently is the failure this command
-    exists to prevent, so the run stops. The message names the place inside the header and
-    both keys as they are written there: "a key was lost" is nothing a person can act on
-    without knowing which, and the two read the same once either is a plain string.
+    Answered with "no SKILL.md here", a person with a typo in the path is sent looking for a
+    file inside a folder that does not exist -- a true sentence about nothing, and the wrong
+    thing to go and do. The code and the report are the same either way; the reason is not.
     """
     root = four_row_tree(tmp_path)
-    folder = skill(
-        tmp_path / "example",
-        "hooks:\n  PreToolUse:\n    2026-09-14: from-date-key\n    '2026-09-14': from-string-key\n",
-    )
+    missing = tmp_path / "definitely-not-there"
 
-    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+    result = convert(missing, SOURCE, TARGET, root=root, allow_stale=True)
 
-    error = result.report["error"]
-
-    assert result.exit_code == 6
-    assert "frontmatter.hooks.PreToolUse" in error
-    # As the header writes them: the date bare, the text quoted. A Python `repr` would name
-    # the type instead -- `datetime.date(2026, 9, 14)` -- which is a string the file does not
-    # contain, and this module refuses to name a value by its type twenty lines further down.
-    assert re.search(r"(?<!['\w])2026-09-14(?!['\w])", error)
-    assert "'2026-09-14'" in error
-    assert "datetime" not in error
+    assert (result.verdict, result.exit_code) == (Verdict.UNDECIDABLE, 6)
+    assert result.report["assets"] == []
+    assert str(missing) in result.report["error"]
+    assert "SKILL.md" not in result.report["error"]
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 000 does not stop root from reading")
@@ -322,8 +309,41 @@ def test_a_skill_file_the_filesystem_refuses_to_open_stops_the_run_the_same_way(
     result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
 
     assert (result.verdict, result.exit_code) == (Verdict.UNDECIDABLE, 6)
-    assert result.report["properties"] == []
+    assert result.report["assets"] == []
     assert str(folder) in result.report["error"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 000 does not stop root from reading")
+def test_an_unreadable_folder_found_inside_a_named_skills_folder_is_a_row_not_a_refusal(
+    tmp_path: Path,
+) -> None:
+    """A bundled directory the filesystem refuses to list, found while reading `--skills`.
+
+    ADR-0012: a refusal is only about the path the caller named -- ``bundles`` itself, which
+    is readable here. What the walk finds inside a skill of it and cannot list is a row, and
+    the skill it sits in, and every other skill beside it, still convert rather than the
+    whole ``--skills`` read being lost over one folder nobody named directly.
+    """
+    root = assembly_tree(tmp_path)
+    bundles = tmp_path / "bundles"
+    folder = skill(bundles / "example", "name: example\n", directories=("scripts",))
+    locked = folder / "scripts" / "locked"
+    locked.mkdir()
+    locked.chmod(0o000)
+
+    try:
+        result = convert_set(
+            Inputs(translation=TRANSLATION, skills=(bundles,)),
+            SOURCE,
+            TARGET,
+            root=root,
+            allow_stale=True,
+        )
+    finally:
+        locked.chmod(0o755)
+
+    assert result.exit_code != 6
+    assert [asset["name"] for asset in result.report["assets"]] == ["example"]
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 000 does not stop root from reading")
@@ -344,7 +364,7 @@ def test_a_description_that_cannot_be_read_is_blamed_on_the_description(tmp_path
 
     assert (result.verdict, result.exit_code) == (Verdict.UNDECIDABLE, 3)
     assert str(shut) in result.report["error"]
-    assert result.report["properties"] == []
+    assert result.report["assets"] == []
 
 
 def test_a_field_the_descriptions_call_optional_is_not_demanded_here(tmp_path: Path) -> None:
@@ -390,7 +410,7 @@ def test_an_environment_version_is_never_guessed(
     result = convert(folder, source, target, root=root, allow_stale=True)
 
     assert (result.verdict, result.exit_code) == (Verdict.UNDECIDABLE, 3)
-    assert result.report["properties"] == []
+    assert result.report["assets"] == []
     assert result.report["error"]
 
 
@@ -491,7 +511,7 @@ def test_the_lost_veto_names_every_hook_it_was_asked_about(tmp_path: Path) -> No
     )
 
     result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
-    found_as = {entry["id"]: entry["found_as"] for entry in result.report["properties"]}
+    found_as = {entry_id: entry["found_as"] for entry_id, entry in rows(result.report).items()}
 
     assert "PreToolUse" in found_as["hook.decision.block"]
     assert "Stop" in found_as["hook.decision.block"]
@@ -521,13 +541,13 @@ def assembly_tree(tmp_path: Path) -> Path:
 
 
 def test_the_skill_is_assembled_at_the_paths_the_target_description_names(tmp_path: Path) -> None:
-    """`SKILL.md` and `scripts/` land where the description says; `sandbox/` is left behind.
+    """`SKILL.md` and `scripts/` land where the description says; `sandbox/` lands beside them.
 
     The expected paths are read off the description written above, not recomputed the way
-    the code computes them. A directory the target names no place for is not carried over
-    on a guess -- it keeps its row in the report, and the report says it was left behind for
-    want of a destination, so that "we had nowhere to put it" cannot be mistaken for "we
-    forgot about it": both look the same in a list of what was written.
+    the code computes them. A directory the target names no place for is not put inside the
+    assembled skill on a guess: it goes where the translation rules say a path no
+    description declares goes, which is beside the result, and it keeps its row so that "we
+    had nowhere to put it" cannot be mistaken for "we forgot about it".
     """
     root = assembly_tree(tmp_path)
     folder = skill(tmp_path / "example", "name: example\n", directories=("scripts", "sandbox"))
@@ -537,10 +557,11 @@ def test_the_skill_is_assembled_at_the_paths_the_target_description_names(tmp_pa
 
     result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
 
-    assert result.report["skill"]["assembled_name"] == "example-antigravity"
+    assert result.report["assets"][0]["assembled_name"] == "example-antigravity"
     assert [(entry["from"], entry["to"]) for entry in result.report["written"]] == [
         ("SKILL.md", ".agents/skills/example-antigravity/SKILL.md"),
         ("scripts/", ".agents/skills/example-antigravity/scripts/"),
+        ("sandbox/", "example/sandbox/"),
     ]
     carried = out / ".agents/skills/example-antigravity/scripts/run.sh"
     assert carried.read_text(encoding="utf-8") == "echo hi\n"
@@ -548,6 +569,42 @@ def test_the_skill_is_assembled_at_the_paths_the_target_description_names(tmp_pa
     assert not (out / ".agents/skills/example-antigravity/sandbox").exists()
     assert any("sandbox/" in line for line in result.report["advice"])
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+
+
+def test_nothing_the_rules_keep_out_is_written_inside_a_directory_that_is(
+    tmp_path: Path,
+) -> None:
+    """A row saying a path was kept out and the same path on disk are one run contradicting itself.
+
+    The ignore list speaks while the set is read, and the bundled directory holding the path
+    is carried whole afterwards -- so the two have to agree at the copy as well, or the
+    report says a build cache stayed behind while five files of it are in the assembled
+    skill, under an exit code calling the transfer clean. Asked of the disk against the
+    rules rather than against the wording of any row: what the report calls it is not the
+    defect, being there is.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n", directories=("scripts",))
+    (folder / "scripts" / "run.sh").write_text("echo hi\n", encoding="utf-8")
+    (folder / "scripts" / "__pycache__").mkdir()
+    (folder / "scripts" / "__pycache__" / "run.cpython-310.pyc").write_bytes(b"\x00")
+    out = tmp_path / "out"
+
+    result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+
+    kept_out = [
+        entry["found_as"]
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if entry["outcome"] == "out-of-scope"
+    ]
+    assert kept_out == ["scripts/__pycache__/"]
+    assert (out / ".agents/skills/example-antigravity/scripts/run.sh").is_file()
+    assert [
+        path.relative_to(out).as_posix()
+        for path in sorted(out.rglob("*"))
+        if TRANSLATION.ignored(path.relative_to(out).as_posix())
+    ] == []
 
 
 def _an_ordinary_absolute_path(root: Path) -> tuple[str, Path | None, str]:
@@ -626,8 +683,8 @@ def test_the_skill_name_follows_one_rule_however_the_folder_is_spelled(
     result = convert(given, SOURCE, TARGET, root=root, out=out, allow_stale=True)
 
     assembled = f"{expected}-antigravity"
-    assert result.report["skill"]["name"] == expected
-    assert result.report["skill"]["assembled_name"] == assembled
+    assert result.report["assets"][0]["name"] == expected
+    assert result.report["assets"][0]["assembled_name"] == assembled
     assert {
         "from": "SKILL.md",
         "to": f".agents/skills/{assembled}/SKILL.md",
@@ -667,10 +724,70 @@ def test_a_frontmatter_name_that_fails_the_rule_is_refused_not_substituted(
 
     assert result.exit_code == 6
     assert result.verdict is Verdict.UNDECIDABLE
-    assert result.report["properties"] == []
+    assert result.report["assets"] == []
     assert result.report["written"] == []
     assert not out.exists()
     assert repr(bad_name) in result.report["error"]
+
+
+def test_an_invalid_name_inside_a_named_skills_folder_is_a_row_the_rest_of_the_set_survives(
+    tmp_path: Path,
+) -> None:
+    """A skill of a `--skills` folder with a bad name earns a row; the good skill beside it
+    still converts (ADR-0012) -- unlike a `--skill` folder named directly, which is refused.
+    """
+    root = assembly_tree(tmp_path)
+    bundles = tmp_path / "bundles"
+    skill(bundles / "Bad-Name", "name: Uppercase\n")
+    skill(bundles / "good", "name: good\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=TRANSLATION, skills=(bundles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert result.exit_code != 6
+    names = {asset["name"] for asset in result.report["assets"]}
+    assert names == {"Bad-Name", "good"}
+    assert (out / ".agents/skills/good-antigravity/SKILL.md").is_file()
+    assert not (out / ".agents/skills/Uppercase-antigravity").exists()
+
+
+def test_a_name_that_overflows_once_suffixed_inside_a_skills_folder_is_a_row_too(
+    tmp_path: Path,
+) -> None:
+    """ADR-0012 covers the assembled name too, not only the frontmatter one.
+
+    A name valid on its own (60 characters) but too long once suffixed with the target's own
+    ``-antigravity`` earns a row on this one skill of a `--skills` folder, not a refusal of
+    the whole read: `_assembled_name` used to be called outside the guard `_skill_name`
+    already had, so the same overflow lost `good` beside it.
+    """
+    root = assembly_tree(tmp_path)
+    bundles = tmp_path / "bundles"
+    long_name = "a" * 60
+    skill(bundles / long_name, f"name: {long_name}\n")
+    skill(bundles / "good", "name: good\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=TRANSLATION, skills=(bundles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert result.exit_code != 6
+    names = {asset["name"] for asset in result.report["assets"]}
+    assert names == {long_name, "good"}
+    assert (out / ".agents/skills/good-antigravity/SKILL.md").is_file()
 
 
 def test_a_name_that_only_overflows_once_the_target_suffix_is_appended_is_refused(
@@ -698,12 +815,11 @@ def test_a_skill_folder_that_is_a_loop_of_links_is_answered_with_a_report_and_no
 ) -> None:
     """A skill folder that is itself a loop of links is a refusal, not a crash.
 
-    `_findings` already refuses this as exit code 6, `no such folder` -- `Path.is_dir()`
-    answers `False` for a cycle rather than raising. The report is then built from that
-    refusal, and building it must not resolve the very folder that could not be read: doing
-    so raises the `RuntimeError` a loop of links gives `Path.resolve()`, uncaught by the
-    `ConvertError`/`OSError` handler around it, leaving a traceback and exit code 1 where the
-    caller was promised a report and exit code 6.
+    The reading refuses it as exit code 6 -- `Path.is_file()` answers `False` for a cycle
+    rather than raising. The report is then built from that refusal, and building it must not
+    resolve the very folder that could not be read: doing so raises the `RuntimeError` a loop
+    of links gives `Path.resolve()`, uncaught by the handler around it, leaving a traceback
+    and exit code 1 where the caller was promised a report and exit code 6.
     """
     root = four_row_tree(tmp_path)
     loop = tmp_path / "loop"
@@ -715,8 +831,8 @@ def test_a_skill_folder_that_is_a_loop_of_links_is_answered_with_a_report_and_no
 
     assert result.exit_code == 6
     assert result.verdict is Verdict.UNDECIDABLE
-    assert result.report["properties"] == []
-    assert result.report["skill"]["name"] == "a"
+    assert result.report["assets"] == []
+    assert str(loop / "a") in result.report["error"]
 
 
 def test_a_part_only_the_target_names_a_place_for_is_clean_not_undeclared(
@@ -750,10 +866,10 @@ def test_a_part_only_the_target_names_a_place_for_is_clean_not_undeclared(
     out = tmp_path / "out"
 
     result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
-    rows = {entry["id"]: entry for entry in result.report["properties"]}
+    found = rows(result.report)
 
     assert properties(result.report)["skill.dir.examples"] == ("reproduced", "extension", "clean")
-    note = rows["skill.dir.examples"]["note"] or ""
+    note = found["skill.dir.examples"]["note"] or ""
     assert "undeclared" not in note.lower()
     assert {
         "from": "examples/",
@@ -930,7 +1046,7 @@ def test_a_header_whose_lines_end_in_crlf_closes_where_a_reader_sees_it_close(
     result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
 
     assert result.exit_code != 6
-    assert result.report["skill"]["name"] == "example"
+    assert result.report["assets"][0]["name"] == "example"
 
 
 def test_the_words_for_a_person_cannot_be_forged_by_what_is_written_in_the_skill(
@@ -1204,6 +1320,98 @@ def test_only_a_hook_the_target_fires_is_staged_and_the_report_says_where_it_bel
     assert any(".agents/hooks.json" in line for line in result.report["advice"])
 
 
+def test_two_skills_hooks_merge_into_the_one_file_the_target_names(tmp_path: Path) -> None:
+    """Two skills of one set both declare ``hooks:`` and both are staged at ``hooks.json``.
+
+    The target names one file for the whole workspace, not one per skill, so this is not the
+    collision `_assemble` refuses the plan over: it is a merge, exactly as two events inside
+    one skill's own header already merge. A run that refused it would write nothing of a set
+    where nothing else was wrong.
+    """
+    root = hooks_tree(tmp_path)
+    bundles = tmp_path / "set" / "bundles"
+    skill(bundles / "alpha", "name: alpha\nhooks:\n  PreToolUse:\n    - alpha.sh\n")
+    skill(bundles / "beta", "name: beta\nhooks:\n  PreToolUse:\n    - beta.sh\n")
+    out = tmp_path / "out"
+
+    convert_set(
+        Inputs(translation=TRANSLATION, skills=(bundles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert (out / ".agents/skills/alpha-antigravity/SKILL.md").is_file()
+    assert (out / ".agents/skills/beta-antigravity/SKILL.md").is_file()
+    staged = out / "hooks.json"
+    assert json.loads(staged.read_text(encoding="utf-8")) == {
+        "hooks": {"PreToolUse": ["alpha.sh", "beta.sh"]}
+    }
+
+
+def test_two_skills_hooks_of_the_same_event_merge_without_inventing_a_command(
+    tmp_path: Path,
+) -> None:
+    """A scalar hook value from each of two skills merges into a list, never a joined string.
+
+    `+` on two strings does not raise, so a header value the reading never required to be a
+    list was silently spliced into one command neither skill's own header wrote -- a value
+    the report then named as carried across untouched. Merging by list, whatever shape each
+    side arrived in, is what keeps the two skills' entries told apart instead.
+    """
+    root = hooks_tree(tmp_path)
+    bundles = tmp_path / "set" / "bundles"
+    skill(bundles / "alpha", "name: alpha\nhooks:\n  PreToolUse: alpha.sh\n")
+    skill(bundles / "beta", "name: beta\nhooks:\n  PreToolUse: beta.sh\n")
+    out = tmp_path / "out"
+
+    convert_set(
+        Inputs(translation=TRANSLATION, skills=(bundles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    staged = out / "hooks.json"
+    assert json.loads(staged.read_text(encoding="utf-8")) == {
+        "hooks": {"PreToolUse": ["alpha.sh", "beta.sh"]}
+    }
+
+
+def test_two_skills_hooks_of_the_same_event_merge_when_each_is_one_mapping(
+    tmp_path: Path,
+) -> None:
+    """A mapping hook value from each of two skills merges into a list rather than crashing.
+
+    `+` on two mappings raises `TypeError`, which is none of the refusals `convert` answers
+    for, so the run left as a traceback and exit 1 instead of a report and a documented code.
+    """
+    root = hooks_tree(tmp_path)
+    bundles = tmp_path / "set" / "bundles"
+    skill(bundles / "alpha", "name: alpha\nhooks:\n  PreToolUse:\n    matcher: alpha.sh\n")
+    skill(bundles / "beta", "name: beta\nhooks:\n  PreToolUse:\n    matcher: beta.sh\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=TRANSLATION, skills=(bundles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert not result.report["error"]
+    staged = out / "hooks.json"
+    assert json.loads(staged.read_text(encoding="utf-8")) == {
+        "hooks": {"PreToolUse": [{"matcher": "alpha.sh"}, {"matcher": "beta.sh"}]}
+    }
+
+
 def test_a_hook_the_target_fires_and_names_no_file_for_is_not_dropped_in_silence(
     tmp_path: Path,
 ) -> None:
@@ -1273,8 +1481,50 @@ def test_a_target_with_nowhere_to_put_a_skill_answers_the_same_either_way(tmp_pa
     assembled = convert(folder, SOURCE, TARGET, root=root, out=tmp_path / "out", allow_stale=True)
 
     assert (reported.verdict, reported.exit_code) == (assembled.verdict, assembled.exit_code)
-    assert (reported.verdict, reported.exit_code) == (Verdict.UNDECIDABLE, 3)
-    assert reported.report["error"]
+    # A price and not a refusal, exactly as it is for every other kind: the skill stays where
+    # it is and the report says why. A code 3 here would be this one skill deciding for the
+    # whole run, and a set of twenty would lose the nineteen rows it had already earned.
+    assert (reported.verdict, reported.exit_code) == (Verdict.LOSSY, 1)
+    assert reported.report["error"] is None
+    assert any("names no place" in line for line in reported.report["advice"])
+    assert reported.report["assets"][0]["assembled_name"] is None
+    assert assembled.report["written"] == []
+
+
+def test_a_target_with_no_place_for_a_skill_keeps_the_rest_of_the_set_in_the_report(
+    tmp_path: Path,
+) -> None:
+    """One root nobody named must not cost the other nineteen entities their rows.
+
+    The refusal it used to be was raised before a single entity had been judged, so a set
+    of many answered with an empty report about a run that never looked at most of it.
+    """
+    root = four_row_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[{"id": "skill.frontmatter.description", "support": "supported"}],
+        layout=[{"id": "agents.project", "path": ".agents/agents/"}],
+    )
+    skills = tmp_path / "set" / "bundles"
+    skill(skills / "alpha", "name: alpha\n")
+
+    result = convert_set(
+        Inputs(translation=MOVING, skills=(skills,), agents=(subagents(tmp_path / "roles"),)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=tmp_path / "out",
+        allow_stale=True,
+    )
+    named = {(asset["kind"], asset["name"]) for asset in result.report["assets"]}
+
+    assert ("skill", "alpha") in named
+    assert ("subagent", "note-keeper") in named
+    # The subagent had somewhere to go and went there; only the skill stayed.
+    assert [entry["to"] for entry in result.report["written"]] == [".agents/agents/note-keeper.md"]
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
 
 def test_the_report_names_the_place_the_bytes_are(tmp_path: Path) -> None:
@@ -1589,14 +1839,14 @@ def test_a_file_beside_the_skill_file_gets_a_row_and_is_never_lost_in_silence(
     out = tmp_path / "out"
 
     result = convert(folder, SOURCE, TARGET, root=root, out=out, allow_stale=True)
-    rows = {entry["id"]: entry for entry in result.report["properties"]}
+    found = rows(result.report)
 
     assert properties(result.report) == {
         "skill.frontmatter.name": ("reproduced", "extension", "clean"),
         "skill.frontmatter.description": ("reproduced", "extension", "clean"),
         "skill.top.README.md": ("unknown", "extension", "lossy"),
     }
-    assert rows["skill.top.README.md"]["found_as"] == "top-level file `README.md`"
+    assert found["skill.top.README.md"]["found_as"] == "top-level file `README.md`"
     assert any("README.md" in line for line in result.report["advice"])
     assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
 
@@ -1646,6 +1896,509 @@ def test_a_rewritten_header_value_is_named_in_the_report(tmp_path: Path) -> None
     assert "2026-09-14" in said[0]
 
 
+def test_a_link_that_leads_nowhere_is_refused_as_the_link_it_is(tmp_path: Path) -> None:
+    """A dangling link is blamed on the link and on what it points at, never on `SKILL.md`.
+
+    `exists()` follows a link, so a link pointing at nothing answers it exactly as a path
+    with nothing at it does -- and the reading, which asks whether there is a skill file at
+    the path, answers both with the words for a folder that holds no skill file. That is the
+    same false blame as a mistyped path, through a narrower door: the folder the person is
+    sent to look inside is a link, and what is wrong is at the other end of it.
+    """
+    root = four_row_tree(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    dangling = tmp_path / "widget"
+    dangling.symlink_to(elsewhere)
+
+    result = convert(dangling, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert (result.verdict, result.exit_code) == (Verdict.UNDECIDABLE, 6)
+    assert result.report["assets"] == []
+    assert str(dangling) in result.report["error"]
+    assert str(elsewhere) in result.report["error"]
+    assert "SKILL.md" not in result.report["error"]
+
+
+def test_a_reason_the_run_has_no_rule_for_is_a_row_whose_verdict_still_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A finding whose reason this run cannot weigh is `unknown`, and the run is not clean.
+
+    The reading and this command version together, so a fifth reason cannot arrive today.
+    The cost of being wrong about it is one-sided: taken for nothing to say, a reason nobody
+    could read turns a lost file into exit code 0 -- an entity called clean because the
+    program did not recognise why it was not. So the row is there, its verdict is counted
+    with every other, and the words the reading used are still in it.
+
+    The reading is replaced here rather than provoked: it has no fifth reason to give, and a
+    rule about what to do with one cannot be pinned by a set that cannot produce it.
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    unheard_of = Finding("scratch/", (), "a reason nobody has written a rule for")
+    monkeypatch.setattr(
+        convert_module, "read", lambda inputs: (Asset(Kind.SKILL, folder, "", {}, (unheard_of,)),)
+    )
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+    named = {
+        entry["found_as"]: entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if entry["id"] is None
+    }
+
+    assert named["scratch/"]["outcome"] == "unknown"
+    assert named["scratch/"]["verdict"] == "lossy"
+    assert unheard_of.note in (named["scratch/"]["note"] or "")
+    # The whole of it: a row that is there and whose weight is not added answers the same as
+    # no row at all to a caller reading the code.
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+    assert not any(unheard_of.note in line for line in result.report["advice"])
+
+
+def a_set(tmp_path: Path) -> Inputs:
+    """A composition of several parts, laid out under names nobody documented.
+
+    Two skills, one of which loses a field the target calls unsupported; a subagent neither
+    description has ever heard of; a build cache the rules keep out; and a file beside the
+    subagents that is no subagent at all.
+    """
+    root = tmp_path / "set"
+    skill(root / "bundles" / "alpha", "name: alpha\n")
+    skill(root / "bundles" / "beta", "name: beta\ndeprecated: true\n")
+    cache = root / "bundles" / "alpha" / "__pycache__"
+    cache.mkdir()
+    (cache / "stale.pyc").write_bytes(b"\x00")
+    (root / "people").mkdir()
+    (root / "people" / "helper.md").write_text(
+        "---\nname: helper\ndescription: helps\n---\n\nYou help.\n", encoding="utf-8"
+    )
+    (root / "people" / "diagram.svg").write_text("<svg/>", encoding="utf-8")
+    return Inputs(translation=TRANSLATION, skills=(root / "bundles",), agents=(root / "people",))
+
+
+def test_a_whole_set_is_one_report_whose_verdict_is_the_worst_of_it(tmp_path: Path) -> None:
+    """One report, rows grouped under the entity they were found in, and one verdict.
+
+    `alpha` transfers whole and `beta` loses a field the target calls unsupported, so the
+    two entities answer differently and the run answers for the worse of them -- the way one
+    skill already answers for the worst of its own rows. A caller reading an exit code must
+    not have to add up a code per entity to learn that something in the set was lost.
+    """
+    root = assembly_tree(tmp_path)
+
+    result = convert_set(a_set(tmp_path), SOURCE, TARGET, root=root, allow_stale=True)
+    verdicts = {
+        (asset["kind"], asset["name"]): asset["verdict"] for asset in result.report["assets"]
+    }
+
+    assert verdicts[("skill", "alpha")] == "clean"
+    assert verdicts[("skill", "beta")] == "lossy"
+    assert verdicts[("subagent", "helper")] == "lossy"
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+    # Grouped, and not merely all present: the row about `beta` belongs to `beta`, or a set
+    # of hundreds of files is a flat list nobody can read an entity out of.
+    beta = next(asset for asset in result.report["assets"] if asset["name"] == "beta")
+    assert "skill.frontmatter.deprecated" in {entry["id"] for entry in beta["properties"]}
+    assert "skill.frontmatter.deprecated" not in {
+        entry["id"]
+        for asset in result.report["assets"]
+        if asset["name"] == "alpha"
+        for entry in asset["properties"]
+    }
+
+
+def test_every_path_of_the_set_gets_a_row_whatever_happens_to_it(tmp_path: Path) -> None:
+    """A path kept out by rule and a file nobody declared are each a row, and different ones.
+
+    Silence is the one failure this command could not be trusted after. What the rules keep
+    out costs the transfer nothing and says so; a file no description declares is `unknown`
+    and carries the one rule the translation states for such a file -- FR-30 asks for one
+    rule and one row, not for a wording of our own beside the rules' own.
+    """
+    root = assembly_tree(tmp_path)
+
+    result = convert_set(a_set(tmp_path), SOURCE, TARGET, root=root, allow_stale=True)
+    named = {
+        entry["found_as"]: entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if entry["id"] is None
+    }
+
+    assert named["__pycache__/"]["outcome"] == "out-of-scope"
+    assert named["__pycache__/"]["verdict"] == "clean"
+    assert named["diagram.svg"]["outcome"] == "unknown"
+    assert named["diagram.svg"]["note"] == TRANSLATION.undocumented.note
+
+
+def test_the_three_things_a_row_can_say_about_being_declared_are_three_rows(
+    tmp_path: Path,
+) -> None:
+    """Both descriptions know the entry, only the target knows it, nobody knows it.
+
+    "No entry with this id in either description" printed where the target does document the
+    entry sends a person looking for a cause that is not there -- and the same run acts on
+    exactly the declaration that line denies. Three cases, three answers, in one run so that
+    the wordings cannot agree by accident.
+    """
+    root = tmp_path / "specs"
+    write(
+        root,
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+        ],
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+            {"id": "skill.frontmatter.confidential", "support": "supported"},
+        ],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+        ],
+    )
+    folder = skill(tmp_path / "example", "name: example\nconfidential: true\ntelepathy: on\n")
+
+    result = convert(folder, SOURCE, TARGET, root=root, allow_stale=True)
+    found = rows(result.report)
+    both = found["skill.frontmatter.name"]
+    target_only = found["skill.frontmatter.confidential"]
+    neither = found["skill.frontmatter.telepathy"]
+
+    # Both know it: `compare` carried the entry, and there is no reason to give for silence.
+    assert both["note"] is None
+    # Only the target: a documented answer, so the row is not the one about nobody knowing.
+    assert target_only["note"] is not None
+    assert target_only["note"] != neither["note"]
+    assert (target_only["outcome"], target_only["verdict"]) == ("reproduced", "clean")
+    assert (neither["outcome"], neither["verdict"]) == ("unknown", "lossy")
+
+
+TRANSLATING = Rules.model_validate(
+    {
+        "rules_version": "2.0",
+        "value_maps": {
+            "subagent.frontmatter.model": {"opus": "pro", "sonnet": "pro"},
+            "subagent.frontmatter.tools": {"Read": "view_file", "Grep": "grep_search"},
+        },
+        "undocumented": {"action": "copy", "note": "nothing declares this file"},
+    }
+)
+"""Rules that do translate something, versioned apart from the descriptions on purpose."""
+
+SUBAGENT_FIELDS = (
+    "subagent.frontmatter.name",
+    "subagent.frontmatter.description",
+    "subagent.frontmatter.model",
+    "subagent.frontmatter.tools",
+    "subagent.system-prompt-body",
+)
+
+
+SKILL_TRANSLATING = Rules.model_validate(
+    {
+        "rules_version": "2.0",
+        "value_maps": {"skill.frontmatter.model": {"sonnet": "pro"}},
+        "undocumented": {"action": "copy", "note": "nothing declares this file"},
+    }
+)
+"""The same rules against the one kind this command assembles today: a skill."""
+
+
+def translating_tree(tmp_path: Path) -> Path:
+    """Descriptions where the target names a one-value set for the model field of a skill."""
+    root = tmp_path / "specs"
+    fields = [
+        {"id": "skill.frontmatter.name", "support": "supported"},
+        {"id": "skill.frontmatter.description", "support": "supported"},
+        {"id": "skill.frontmatter.model", "support": "supported"},
+        {"id": "skill.frontmatter.licence", "support": "supported"},
+    ]
+    write(root, vendor="anthropic", environment="claude-code", capabilities=fields)
+    target: list[dict[str, Any]] = [dict(entry) for entry in fields]
+    target[2]["values"] = ["pro"]
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=target,
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+        ],
+    )
+    return root
+
+
+def a_subagent(folder: Path, frontmatter: str) -> Inputs:
+    """A composition of one folder holding one subagent with the given extra header lines."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "note-keeper.md").write_text(
+        f"---\nname: note-keeper\ndescription: keeps notes\n{frontmatter}---\n\nYou keep notes.\n",
+        encoding="utf-8",
+    )
+    return Inputs(translation=TRANSLATING, agents=(folder,))
+
+
+def value_tree(tmp_path: Path, *, values: list[str] | None) -> Path:
+    """Descriptions of two environments that both know the subagent fields below.
+
+    ``values`` is the closed set the *target* names for the model field, or ``None`` for a
+    target that names none -- which is the whole of the difference these cases turn on.
+    """
+    root = tmp_path / "specs"
+    fields = [
+        {"kind": "subagent-field", "id": entry, "support": "supported"} for entry in SUBAGENT_FIELDS
+    ]
+    write(root, vendor="anthropic", environment="claude-code", capabilities=fields)
+    target: list[dict[str, Any]] = [dict(entry) for entry in fields]
+    if values is not None:
+        target[SUBAGENT_FIELDS.index("subagent.frontmatter.model")]["values"] = values
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=target,
+        # A place for a subagent, because a target that names none has nowhere to put one at
+        # all -- a price of its own, and not what these cases about values turn on.
+        layout=[{"id": "agents.project", "path": ".agents/agents/"}],
+    )
+    return root
+
+
+def test_a_value_outside_the_targets_set_is_translated_and_the_report_names_both_versions(
+    tmp_path: Path,
+) -> None:
+    """The applied rule is in the report -- what was there, what it became, by what rule.
+
+    And both versions with it: the descriptions decide what the closed set is, the rules
+    decide what a value outside it becomes, and the two are versioned apart, so a person
+    repeating this run needs both numbers to get the same bytes back (FR-13.1).
+    """
+    root = value_tree(tmp_path, values=["inherit", "flash", "pro"])
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "model: sonnet\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+
+    assert result.report["rules_version"] == "2.0"
+    assert result.report["target"] == {
+        "vendor": "google",
+        "environment": "antigravity",
+        "version": "1.0.0",
+    }
+    assert [
+        (entry["id"], entry["from"], entry["to"]) for entry in result.report["translations"]
+    ] == [("subagent.frontmatter.model", "sonnet", "pro")]
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_a_value_outside_the_set_and_outside_the_table_is_a_row_and_not_a_guess(
+    tmp_path: Path,
+) -> None:
+    """Nothing is invented for it and nothing is dropped: the run says what it could not do.
+
+    A value the target does not accept and the rules have no counterpart for is exactly the
+    case a converter is tempted to resolve by picking the nearest-sounding word. The answer
+    is a row naming the value and the reason, and a verdict that is not `clean` (FR-12).
+    """
+    root = value_tree(tmp_path, values=["inherit", "flash", "pro"])
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "model: haiku\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+    row = next(
+        entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if "haiku" in entry["found_as"]
+    )
+
+    assert result.report["translations"] == []
+    assert (row["id"], row["outcome"], row["verdict"]) == (
+        "subagent.frontmatter.model",
+        "unknown",
+        "lossy",
+    )
+    assert row["note"] == convert_module.NO_COUNTERPART
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+
+
+def test_a_field_the_target_names_no_value_set_for_is_left_alone_and_says_why(
+    tmp_path: Path,
+) -> None:
+    """No set, no translation: silence about the set is not permission to translate.
+
+    The rules do carry a counterpart for this very value, and it is still not applied --
+    which is the whole of the boundary. Without a documented set there is nothing that makes
+    the written value wrong, so a rewrite would be a rule of ours passed off as a fact about
+    the target environment (FR-11.2).
+    """
+    root = value_tree(tmp_path, values=None)
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "model: sonnet\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+    row = next(
+        entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if "sonnet" in entry["found_as"]
+    )
+
+    assert result.report["translations"] == []
+    assert (row["outcome"], row["verdict"]) == ("unknown", "lossy")
+    assert row["note"] == convert_module.NO_VALUE_SET
+
+
+def test_a_value_that_is_not_text_is_refused_with_the_file_and_the_field_named(
+    tmp_path: Path,
+) -> None:
+    """A number where a tier was expected is a refusal a person can act on (FR-11.1).
+
+    Both halves of the address are asserted: a message naming only the field sends a person
+    grepping a set for it, and one naming only the file leaves them reading a header.
+    """
+    root = value_tree(tmp_path, values=["inherit", "flash", "pro"])
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "model: 3\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+
+    assert result.exit_code == 6
+    assert str(tmp_path / "roles" / "note-keeper.md") in result.report["error"]
+    assert "`model`" in result.report["error"]
+
+
+def test_the_assembled_skill_file_carries_the_translated_value_and_not_the_written_one(
+    tmp_path: Path,
+) -> None:
+    """The bytes that leave, not the report about them: the file says what the run claims.
+
+    A report that prints `translated to pro` over a file still saying `sonnet` states a fact
+    about the caller's data that is not true, and calls the transfer clean while the value
+    the target refuses is exactly what was written. Asserted on the staged file, because the
+    five cases above all watch the report and none of them watches what the caller gets.
+
+    Everything the run did not translate is asserted untouched in the same breath: a header
+    re-dumped wholesale would pass an assertion about `pro` while quietly rewriting the rest
+    of somebody's file, which is the same defect with the blame moved.
+    """
+    root = translating_tree(tmp_path)
+    folder = skill(tmp_path / "alpha", "name: alpha\nmodel: sonnet\nlicence: sonnet-2.0\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=SKILL_TRANSLATING, skill=(folder,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/skills/alpha-antigravity/SKILL.md").read_text(encoding="utf-8")
+
+    assert "model: pro\n" in staged
+    assert "model: sonnet" not in staged
+    # The value of another key, and the body, are none of the translation's business: only
+    # what a rule was applied to may differ from the file the run was given.
+    assert "licence: sonnet-2.0\n" in staged
+    assert staged.endswith("\nBody.\n")
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_a_counterpart_the_targets_own_set_does_not_carry_is_a_row_and_not_a_rewrite(
+    tmp_path: Path,
+) -> None:
+    """The rules do not outrank the description: a pair the target refuses is not applied.
+
+    The two files are versioned apart and either may be the stale one, so a counterpart the
+    target's own set does not contain is a disagreement this run cannot settle -- and writing
+    the value anyway would let a rules file quietly overrule the documentation it was written
+    against, which is the one thing Decisions 1 exists to prevent.
+    """
+    root = value_tree(tmp_path, values=["inherit", "flash"])
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "model: sonnet\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+    row = next(
+        entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if "sonnet" in entry["found_as"]
+    )
+
+    assert result.report["translations"] == []
+    assert (row["outcome"], row["verdict"]) == ("unknown", "lossy")
+    assert row["note"] == convert_module.REFUSED_BY_THE_TARGET
+
+
+def test_a_tool_name_without_a_documented_pair_stays_as_it_is_and_is_named(
+    tmp_path: Path,
+) -> None:
+    """The names the rules pair are translated; the rest cross unchanged, each with a row.
+
+    Dropping an unpaired name would quietly narrow what the subagent may do, and pairing it
+    by how it sounds would hand the target a tool it never documented. Both are silent, and
+    the report is what this command has instead of silence (FR-17, FR-18).
+    """
+    root = value_tree(tmp_path, values=["inherit", "flash", "pro"])
+
+    result = convert_set(
+        a_subagent(tmp_path / "roles", "tools: Read, Write, Grep, SendMessage\n"),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+    unpaired = {
+        entry["found_as"]: entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if entry["note"] == convert_module.NO_TOOL_COUNTERPART
+    }
+
+    assert [(entry["from"], entry["to"]) for entry in result.report["translations"]] == [
+        ("Read", "view_file"),
+        ("Grep", "grep_search"),
+    ]
+    assert set(unpaired) == {"tool name `Write`", "tool name `SendMessage`"}
+    assert unpaired["tool name `Write`"]["id"] == "subagent.frontmatter.tools"
+    assert result.report["advice"] == list(convert_module._HOW_TO_KEEP_A_TOOL_NAME)
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+
+
 def cli_arguments(folder: Path, root: Path) -> list[str]:
     """The one run both command-line tests make, as a list of arguments."""
     return [
@@ -1679,10 +2432,31 @@ def test_standard_output_carries_the_json_report_and_nothing_else(tmp_path: Path
     saved = runner.invoke(app, [*arguments, "--report", str(into_file)])
 
     assert (piped.exit_code, saved.exit_code) == (0, 0)
-    assert json.loads(piped.stdout)["report_schema"] == 1
-    assert piped.stderr.startswith(str(folder))
+    assert json.loads(piped.stdout)["report_schema"] == 2
+    assert str(folder) in piped.stderr
     assert saved.stdout == ""
     assert json.loads(into_file.read_text(encoding="utf-8")) == json.loads(piped.stdout)
+
+
+def test_a_translation_rules_file_that_is_not_utf8_exits_6_not_1(tmp_path: Path) -> None:
+    """Documented exit code 6 ("an input was not read") needs `rules.load` to answer a
+    non-UTF-8 file with `InvalidRules`, which is what the CLI already catches (AGENTS.md).
+
+    Left as a raw `UnicodeDecodeError`, it passes straight through that handler and exits 1,
+    the code for a transfer with known losses -- with a traceback on standard error instead
+    of the machine-readable report every outcome of this command promises (FR-26).
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n")
+    broken = tmp_path / "broken.yaml"
+    broken.write_bytes(b'rules_version: "1.0"\nundocumented:\n  action: copy\n  note: \xff\n')
+
+    result = runner.invoke(app, [*cli_arguments(folder, root), "--translation", str(broken)])
+
+    assert result.exit_code == 6
+    issued = json.loads(result.stdout)
+    assert issued["exit_code"] == 6
+    assert str(broken) in issued["error"]
 
 
 def test_a_report_that_cannot_be_written_is_still_issued_and_says_so(tmp_path: Path) -> None:
@@ -1732,3 +2506,1393 @@ def test_a_run_that_was_stopped_keeps_its_code_over_the_unwritten_report(tmp_pat
     assert issued["exit_code"] == 6
     assert str(folder) in issued["error"]
     assert str(nowhere) in issued["error"]
+
+
+MOVING = Rules.model_validate(
+    {
+        "rules_version": "2.0",
+        "value_maps": {
+            "subagent.frontmatter.model": {"opus": "pro", "sonnet": "pro"},
+            "subagent.frontmatter.tools": {"Read": "view_file", "Grep": "grep_search"},
+            # The shape the value is written in, which is a value like any other here: the
+            # left-hand side is how the source wrote it, the right-hand side the form the
+            # target documents.
+            "subagent.frontmatter.tools.form": {"comma-separated string": "list"},
+            # The empty left-hand side is the value a file that declares none has: the rule
+            # says what a rule file without a trigger gets, in the same shape as every other
+            # pair -- what was written, and what it becomes.
+            "rules.frontmatter.trigger": {"": "always_on"},
+        },
+        "rewrite": {"include": ["*.md"], "exclude": ["CHANGELOG.md"]},
+        "undocumented": {"action": "copy", "note": "nothing declares this file"},
+    }
+)
+"""Rules for a set of several kinds: a model tier to translate and a header to add."""
+
+
+def destinations_tree(tmp_path: Path, agents_root: str = ".agents/agents/") -> Path:
+    """Descriptions whose target names a place for every kind of this set except a command.
+
+    ``agents_root`` is the one layout path a caller here may choose, because where a root is
+    measured from is what a run that installs is held to: a test about a path leading out of
+    every root needs a description that names one.
+    """
+    root = tmp_path / "specs"
+    fields: list[dict[str, Any]] = [
+        {"kind": "subagent-field", "id": entry, "support": "supported"} for entry in SUBAGENT_FIELDS
+    ]
+    write(root, vendor="anthropic", environment="claude-code", capabilities=fields)
+    target: list[dict[str, Any]] = [dict(entry) for entry in fields]
+    target[SUBAGENT_FIELDS.index("subagent.frontmatter.model")]["values"] = [
+        "inherit",
+        "flash",
+        "pro",
+    ]
+    target.append(
+        {
+            "kind": "settings-file",
+            "id": "rules.frontmatter.trigger",
+            "support": "supported",
+            "values": ["always_on", "model_decision"],
+        }
+    )
+    target.append(
+        {
+            "kind": "subagent-field",
+            "id": "subagent.frontmatter.tools.form",
+            "support": "supported",
+            "values": ["list"],
+        }
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=target,
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skill.top.CHANGELOG.md", "path": "<skill-name>/CHANGELOG.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+            {"id": "agents.project", "path": agents_root},
+            {"id": "agents.user", "path": "~/.gemini/config/agents/"},
+            {"id": "rules.project", "path": ".agents/rules/"},
+        ],
+    )
+    return root
+
+
+def subagents(folder: Path, frontmatter: str = "model: sonnet\n") -> Path:
+    """A folder of subagents named nothing like the target's own, holding one subagent."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "note-keeper.md").write_text(
+        f"---\nname: note-keeper\ndescription: keeps notes\n{frontmatter}---\n\nYou keep notes.\n",
+        encoding="utf-8",
+    )
+    return folder
+
+
+def test_a_subagent_is_assembled_where_the_target_names_agents_with_the_value_translated(
+    tmp_path: Path,
+) -> None:
+    """The whole point of the track: the file lands where the environment reads it, and reads.
+
+    A subagent copied to the right folder carrying `model: sonnet` is as invisible as one
+    never copied -- the target's own closed set has no such tier -- so the destination and
+    the translated header are one acceptance and not two. Both are read off the target
+    description written above, never recomputed the way the code computes them.
+    """
+    root = destinations_tree(tmp_path)
+    folder = subagents(tmp_path / "set" / "roles")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(folder,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert [(entry["from"], entry["to"]) for entry in result.report["written"]] == [
+        ("note-keeper.md", ".agents/agents/note-keeper.md")
+    ]
+    assert "model: pro\n" in staged
+    assert "model: sonnet" not in staged
+    assert staged.endswith("\nYou keep notes.\n")
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_the_form_of_a_value_is_translated_like_the_value_itself(tmp_path: Path) -> None:
+    """The names inside the field are half of it; the shape the field is written in is the other.
+
+    A subagent whose `tools` is one comma-separated string reaches the target and is never
+    read, so the shape the target documents is a property of its description -- the closed
+    set of `subagent.frontmatter.tools.form` -- and turning one shape into the other is a
+    translation rule, shown in the report as every applied rule is.
+    """
+    root = destinations_tree(tmp_path)
+    folder = subagents(tmp_path / "set" / "roles", "tools: Read, Grep\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(folder,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert ("subagent.frontmatter.tools.form", "comma-separated string", "list") in [
+        (entry["id"], entry["from"], entry["to"]) for entry in result.report["translations"]
+    ]
+    assert yaml.safe_load(staged.split("---")[1])["tools"] == ["view_file", "grep_search"]
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_the_level_the_caller_asked_for_decides_which_agents_root_is_used(tmp_path: Path) -> None:
+    """`--scope user` is the other entry of the same pair, and the bytes still stay under out."""
+    root = destinations_tree(tmp_path)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(subagents(tmp_path / "set" / "roles"),)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        scope=Scope.USER,
+        allow_stale=True,
+    )
+    written = result.report["written"][0]
+
+    assert written["to"] == f"{Path.home()}/.gemini/config/agents/note-keeper.md"
+    assert written["path"] == str(out / ".gemini/config/agents/note-keeper.md")
+
+
+def test_a_rules_file_moves_to_the_rules_root_and_carries_the_header_that_loads_it(
+    tmp_path: Path,
+) -> None:
+    """`.agents/rules/` and `trigger: always_on`: without either, the rule is on disk and idle.
+
+    The value is the target's own, from the closed set its description names; that the
+    header is added at all is the translation rules' decision, and the report shows it as
+    the applied rule it is.
+    """
+    root = destinations_tree(tmp_path)
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("Be brief.\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert [entry["to"] for entry in result.report["written"]] == [".agents/rules/tone.md"]
+    assert (out / ".agents/rules/tone.md").read_text(encoding="utf-8") == (
+        "---\ntrigger: always_on\n---\n\nBe brief.\n"
+    )
+    assert [(entry["id"], entry["to"]) for entry in result.report["translations"]] == [
+        ("rules.frontmatter.trigger", "always_on")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("header", "expected", "applied"),
+    [
+        ("---\nscope: repo\n---\n\n", "---\ntrigger: always_on\nscope: repo\n---\n\n", 1),
+        ("---\ntrigger: model_decision\n---\n\n", "---\ntrigger: model_decision\n---\n\n", 0),
+    ],
+    ids=["a header without the key", "a header that already sets it"],
+)
+def test_a_rules_file_that_has_a_header_keeps_it_and_only_gains_what_is_missing(
+    tmp_path: Path, header: str, expected: str, applied: int
+) -> None:
+    """Somebody else's header is not redecided: the key is added, or nothing happens at all."""
+    root = destinations_tree(tmp_path)
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text(f"{header}Be brief.\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert (out / ".agents/rules/tone.md").read_text(encoding="utf-8") == f"{expected}Be brief.\n"
+    assert len(result.report["translations"]) == applied
+
+
+def test_two_rule_files_of_one_name_from_different_folders_collide_rather_than_overwrite(
+    tmp_path: Path,
+) -> None:
+    """The second would land on the first, and a report calling both carried over is a lie."""
+    root = destinations_tree(tmp_path)
+    named = []
+    for folder in ("house", "team"):
+        rule = tmp_path / "set" / folder / "tone.md"
+        rule.parent.mkdir(parents=True)
+        rule.write_text("Be brief.\n", encoding="utf-8")
+        named.append(rule)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=tuple(named)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert result.exit_code == 8
+    assert result.report["written"] == []
+    assert not (out / ".agents/rules/tone.md").exists()
+
+
+@pytest.mark.parametrize("names", [("note.md", "recap.md"), ()], ids=["two commands", "none"])
+def test_every_command_earns_one_refusal_and_no_command_is_ever_written(
+    tmp_path: Path, names: tuple[str, ...]
+) -> None:
+    """A row each, naming what it is, why it stays and what to do instead -- and never a file.
+
+    Counted against the commands on the input and not against a number somebody observed
+    once: an empty folder of commands earns no refusals at all, and that is the same rule.
+    """
+    root = destinations_tree(tmp_path)
+    commands = tmp_path / "set" / "shortcuts"
+    commands.mkdir(parents=True)
+    for name in names:
+        (commands / name).write_text(COMMAND, encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, commands=(commands,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    refused = [
+        entry
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+        if entry["id"] == "command.file"
+    ]
+
+    assert len(refused) == len(names)
+    assert {entry["found_as"] for entry in refused} == {f"command file `{name}`" for name in names}
+    assert all(entry["note"] == convert_module.NO_ROOM_FOR[Kind.COMMAND] for entry in refused)
+    assert result.report["written"] == []
+
+
+@pytest.mark.parametrize("action", ["copy", "skip"])
+def test_the_rule_for_an_undocumented_file_is_carried_out_and_not_only_printed(
+    tmp_path: Path, action: str
+) -> None:
+    """`action` decides what happens to a file nobody declared; the row says so either way.
+
+    The row has been there since the set report; until now the action beside it decided
+    nothing, so a rules file saying `skip` still carried the file across.
+    """
+    root = destinations_tree(tmp_path)
+    folder = subagents(tmp_path / "set" / "roles")
+    (folder / "openai.yaml").write_text("model: gpt\n", encoding="utf-8")
+    out = tmp_path / "out"
+    translation = MOVING.model_copy(
+        update={"undocumented": MOVING.undocumented.model_copy(update={"action": action})}
+    )
+
+    result = convert_set(
+        Inputs(translation=translation, agents=(folder,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    carried = str(out / "roles/openai.yaml") in {
+        entry["path"] for entry in result.report["written"]
+    }
+
+    assert carried is (action == "copy")
+    assert (out / "roles/openai.yaml").exists() is (action == "copy")
+    # Never in the root the target reads as a folder of subagents, whichever way the rule
+    # went: what is carried is the file, not a claim that the environment will take it.
+    assert not (out / ".agents/agents/openai.yaml").exists()
+    # The row is there whichever way the rule went: a file dropped in silence is the one
+    # thing this command exists to prevent, and copying it is not a reason to stop saying so.
+    assert any(
+        entry["found_as"] == "openai.yaml"
+        for asset in result.report["assets"]
+        for entry in asset["properties"]
+    )
+
+
+def test_a_rule_file_that_is_not_utf_8_is_refused_with_its_path_and_still_reports(
+    tmp_path: Path,
+) -> None:
+    """Somebody else's bytes are not this command's to crash on: a refusal, never a traceback.
+
+    Every other file of a set already answers this way, and a caller who gets a stack trace
+    instead of a report has no exit code to act on and no path to go and look at.
+    """
+    root = destinations_tree(tmp_path)
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_bytes(b"Soyez bref\xe9\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert result.exit_code == 6
+    assert str(rule) in result.report["error"]
+    assert result.report["written"] == []
+    assert not out.exists()
+
+
+def test_an_undocumented_path_is_never_staged_in_a_root_the_target_scans_for_entities(
+    tmp_path: Path,
+) -> None:
+    """`action: copy` keeps the file; it does not hand the environment a broken entity.
+
+    A folder with no skill file inside the target's own skills root is a skill the
+    environment will try to read and fail to, which is worse than the silence this whole
+    command exists to break -- and it contradicts the very row that tells the caller to
+    place the file by hand. It is staged under `out` instead, beside the part it came from.
+    """
+    root = destinations_tree(tmp_path)
+    skills = tmp_path / "set" / "bundles"
+    skill(skills / "alpha", "name: alpha\n")
+    (skills / "_templates").mkdir()
+    (skills / "_templates" / "note.md").write_text("A template.\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, skills=(skills,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert not (out / ".agents/skills/_templates").exists()
+    assert (out / "bundles/_templates/note.md").read_text(encoding="utf-8") == "A template.\n"
+    assert (out / ".agents/skills/alpha-antigravity/SKILL.md").is_file()
+    assert str(out / "bundles/_templates") in {entry["path"] for entry in result.report["written"]}
+
+
+def linking_subagents(folder: Path, addresses: str) -> Path:
+    """A subagent whose body addresses another file of the set by a relative path."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "note-keeper.md").write_text(
+        "---\nname: note-keeper\ndescription: keeps notes\nmodel: sonnet\n---\n\n"
+        f"Follow `{addresses}` when writing.\n",
+        encoding="utf-8",
+    )
+    return folder
+
+
+def test_an_address_of_a_moved_file_points_at_where_this_run_put_it(tmp_path: Path) -> None:
+    """The point of the whole rule: the two files move apart, and the address moves with them.
+
+    A subagent goes to the agents root and the rule file it names goes to the rules root, so
+    the path that reached one from the other in the source set reaches nothing in the target.
+    Left alone it is a role sending itself to a mode that is not there. The new address is
+    worked out from where the two parts landed, and both of those are read off the target
+    description.
+    """
+    root = destinations_tree(tmp_path)
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("Be brief.\n", encoding="utf-8")
+    roles = linking_subagents(tmp_path / "set" / "roles", "../policy/tone.md")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(roles,), rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert "`../rules/tone.md`" in staged
+    assert "../policy/tone.md" not in staged
+    assert (out / ".agents/agents" / "../rules/tone.md").resolve().is_file()
+    assert [(entry["from"], entry["to"]) for entry in result.report["links"]] == [
+        ("../policy/tone.md", "../rules/tone.md")
+    ]
+
+
+def test_a_link_inside_a_bundled_directory_is_repointed_too(tmp_path: Path) -> None:
+    """`SKILL.md`'s own link moves and so does one inside a directory bundled beside it.
+
+    A bundled directory crosses whole (`shutil.copytree`), and nothing else in `_relinked`
+    ever opens a file inside one -- so a link written in ``references/deep.md`` was never
+    read, let alone repointed, while the very same link in `SKILL.md` already was. Both name
+    the one rule file this run moves, from two different depths, and both must land pointed
+    at where it went.
+    """
+    root = tmp_path / "specs"
+    write(
+        root,
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+        ],
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+            {
+                "id": "rules.frontmatter.trigger",
+                "kind": "settings-file",
+                "support": "supported",
+                "values": ["always_on", "model_decision"],
+            },
+        ],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skill.dir.references", "path": "<skill-name>/references/"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+            {"id": "rules.project", "path": ".agents/rules/"},
+        ],
+    )
+    rule = tmp_path / "set" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("Be brief.\n", encoding="utf-8")
+    folder = skill(
+        tmp_path / "set" / "skills" / "gamma", "name: gamma\n", directories=("references",)
+    )
+    (folder / "SKILL.md").write_text(
+        "---\ndescription: what it does\nname: gamma\n---\n\nFollow [tone](../../tone.md).\n",
+        encoding="utf-8",
+    )
+    (folder / "references" / "deep.md").write_text(
+        "Follow [tone](../../../tone.md).\n", encoding="utf-8"
+    )
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, skill=(folder,), rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    skill_md = (out / ".agents/skills/gamma-antigravity/SKILL.md").read_text(encoding="utf-8")
+    deep_md = (out / ".agents/skills/gamma-antigravity/references/deep.md").read_text(
+        encoding="utf-8"
+    )
+    assert "../../rules/tone.md" in skill_md
+    assert "../../../rules/tone.md" in deep_md
+    assert [(entry["from"], entry["to"]) for entry in result.report["links"]] == [
+        ("../../tone.md", "../../rules/tone.md"),
+        ("../../../tone.md", "../../../rules/tone.md"),
+    ]
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_an_address_of_a_file_that_stayed_where_it_was_is_left_exactly_as_written(
+    tmp_path: Path,
+) -> None:
+    """Only what moved is repointed. A command is assembled nowhere, so its path still holds.
+
+    Rewriting it would aim the subagent at a place under `--out` where nothing was ever
+    written, turning an address that still works into one that does not -- and the run would
+    report the damage as work done.
+    """
+    root = destinations_tree(tmp_path)
+    shortcuts = tmp_path / "set" / "shortcuts"
+    shortcuts.mkdir(parents=True)
+    (shortcuts / "note.md").write_text(COMMAND, encoding="utf-8")
+    roles = linking_subagents(tmp_path / "set" / "roles", "../shortcuts/note.md")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(roles,), commands=(shortcuts,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert "`../shortcuts/note.md`" in staged
+    assert result.report["links"] == []
+    assert not [line for line in result.report["advice"] if "../shortcuts/note.md" in line]
+
+
+def test_an_address_leading_out_of_the_set_is_left_alone_and_named_in_the_report(
+    tmp_path: Path,
+) -> None:
+    """Nobody here can work out what it should become, and silence would hide that from the caller.
+
+    The composition names what this run was given; a path under none of it points at a file
+    this run never saw, never moved and can say nothing about beyond that it is still written
+    the way it was.
+    """
+    root = destinations_tree(tmp_path)
+    roles = linking_subagents(tmp_path / "set" / "roles", "../../house/style.md")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(roles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert "`../../house/style.md`" in staged
+    assert result.report["links"] == []
+    assert [line for line in result.report["advice"] if "../../house/style.md" in line]
+
+
+def test_the_change_history_is_carried_over_byte_for_byte(tmp_path: Path) -> None:
+    """The one file the rules keep out of substitution, and the one test that it stays out.
+
+    A change history is a record of what was written. An address inside it is part of that
+    record, and a run that repointed it would leave a record of what we wish had been
+    written -- so the file arrives with the address still leading where it led, which is
+    exactly the state the exclusion promises.
+    """
+    root = destinations_tree(tmp_path)
+    folder = skill(tmp_path / "set" / "bundles" / "note-taker", "name: note-taker\n")
+    history = "# History\n\n- Moved the rules to `../../policy/tone.md`.\n"
+    (folder / "CHANGELOG.md").write_text(history, encoding="utf-8")
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("Be brief.\n", encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, skill=(folder,), rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    carried = out / ".agents/skills/note-taker-antigravity/CHANGELOG.md"
+    assert carried.read_bytes() == history.encode("utf-8")
+    assert result.report["links"] == []
+
+
+def test_a_link_definition_of_a_moved_file_is_named_even_though_it_is_not_repointed(
+    tmp_path: Path,
+) -> None:
+    """Not rewriting it is a ceiling; not saying so would be the silence this command is against.
+
+    A definition stands in one place and is used from another, and the substitution here only
+    ever edits an address where it stands -- so a file that moved keeps a definition pointing
+    at where it used to be. That is a broken file, and a broken file the caller is told about
+    is a different thing from a broken file nobody mentions. The row names both the address
+    as written and the place to point it at.
+    """
+    root = destinations_tree(tmp_path)
+    rule = tmp_path / "set" / "policy" / "tone.md"
+    rule.parent.mkdir(parents=True)
+    rule.write_text("Be brief.\n", encoding="utf-8")
+    roles = tmp_path / "set" / "roles"
+    roles.mkdir(parents=True)
+    (roles / "note-keeper.md").write_text(
+        "---\nname: note-keeper\ndescription: keeps notes\nmodel: sonnet\n---\n\n"
+        "Follow [tone][t] when writing.\n\n[t]: ../policy/tone.md\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(roles,), rules=(rule,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    staged = (out / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+
+    assert "[t]: ../policy/tone.md\n" in staged
+    assert result.report["links"] == []
+    assert [
+        line
+        for line in result.report["advice"]
+        if "../policy/tone.md" in line and "../rules/tone.md" in line
+    ]
+
+
+def translation_file(tmp_path: Path, translation: Rules) -> Path:
+    """The translation rules on disk, where `--translation` can name them."""
+    path = tmp_path / "translation.yaml"
+    path.write_text(
+        yaml.safe_dump(translation.model_dump(mode="json", by_alias=True)), encoding="utf-8"
+    )
+    return path
+
+
+def a_set_on_disk(tmp_path: Path) -> dict[str, Path]:
+    """A set laid out under names of its owner's own choosing, one part of every kind."""
+    home = tmp_path / "set"
+    skill(home / "bundles" / "note-taker", "name: note-taker\n")
+    subagents(home / "roles")
+    (home / "shortcuts").mkdir(parents=True)
+    (home / "shortcuts" / "note.md").write_text(COMMAND, encoding="utf-8")
+    (home / "policy").mkdir(parents=True)
+    (home / "policy" / "tone.md").write_text("Be brief.\n", encoding="utf-8")
+    return {name: home / name for name in ("bundles", "roles", "shortcuts", "policy")}
+
+
+def test_the_composition_of_a_set_is_given_on_the_command_line(tmp_path: Path) -> None:
+    """Every part of a set reaches the run through an option, from folders named anything.
+
+    The modular half of the command has taken a composition since the reading of a set was
+    written, and until there are options for it a person can still only ever name one skill
+    folder. The names below are the owner's, not the target's and not this repository's:
+    that a set laid out differently converts by the same rules is the whole reason the
+    composition is data rather than a walk of a fixed tree.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    out = tmp_path / "out"
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "--skills",
+            str(parts["bundles"]),
+            "--agents",
+            str(parts["roles"]),
+            "--commands",
+            str(parts["shortcuts"]),
+            "--rules",
+            str(parts["policy"] / "tone.md"),
+            "--translation",
+            str(translation_file(tmp_path, MOVING)),
+            "--source",
+            SOURCE,
+            "--target",
+            TARGET,
+            "--specs",
+            str(root),
+            "--allow-stale",
+            "--out",
+            str(out),
+        ],
+    )
+    report = json.loads(result.stdout)
+
+    assert [entry["kind"] for entry in report["assets"]] == [
+        "skill",
+        "subagent",
+        "command",
+        "rules-file",
+    ]
+    assert report["rules_version"] == "2.0"
+    # The other half of the same acceptance: a run that assembled says how to install what
+    # it assembled, or the folder it made is as far as anybody gets.
+    assert convert_module.INSTALL_WITH in report["advice"]
+    assert (out / ".agents/skills/note-taker-antigravity/SKILL.md").exists()
+    assert (out / ".agents/agents/note-keeper.md").exists()
+    assert (out / ".agents/rules/tone.md").exists()
+
+
+def test_install_writes_into_the_roots_the_target_description_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The gap this whole track is about: on disk somewhere, and read by the environment.
+
+    Both spellings a layout path can open with are exercised at once -- the skills root of
+    this description says `<workspace-root>/` and its agents root says neither, which is the
+    same root by a different spelling. Neither is written here or anywhere else in the
+    module: the placeholder and the bare path are expanded where every other destination is.
+    The workspace is a folder of this test's own, so what a live root means is decided by
+    where the command runs and not by whose machine it runs on.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    result = convert_set(
+        Inputs(
+            translation=MOVING,
+            skills=(parts["bundles"],),
+            agents=(parts["roles"],),
+            rules=(parts["policy"] / "tone.md",),
+        ),
+        SOURCE,
+        TARGET,
+        root=root,
+        install=True,
+        allow_stale=True,
+    )
+    announced = capsys.readouterr().err
+
+    assert (workspace / ".agents/skills/note-taker-antigravity/SKILL.md").exists()
+    assert "model: pro" in (workspace / ".agents/agents/note-keeper.md").read_text(encoding="utf-8")
+    assert "trigger: always_on" in (workspace / ".agents/rules/tone.md").read_text(encoding="utf-8")
+    assert str(workspace / ".agents/agents/note-keeper.md") in announced
+    assert str(workspace / ".agents/rules/tone.md") in {
+        entry["path"] for entry in result.report["written"]
+    }
+
+
+def test_a_second_install_names_what_is_already_there_and_replaces_none_of_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Run twice over a live root, and the second run shows the places and touches nothing.
+
+    This is also where the order is proved: the second run writes nothing at all, and the
+    plan is on the error stream anyway. A plan printed after the writing would be a receipt,
+    and a receipt is no help to somebody deciding whether to let a command near their own
+    folders.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    inputs = Inputs(translation=MOVING, agents=(parts["roles"],))
+    convert_set(inputs, SOURCE, TARGET, root=root, install=True, allow_stale=True)
+    placed = workspace / ".agents/agents/note-keeper.md"
+    first = placed.read_bytes()
+    capsys.readouterr()
+    subagents(parts["roles"], frontmatter="model: opus\ncolor: red\n")
+
+    result = convert_set(inputs, SOURCE, TARGET, root=root, install=True, allow_stale=True)
+    announced = capsys.readouterr().err
+
+    assert result.exit_code == 8
+    assert placed.read_bytes() == first
+    assert f"{placed} <- " in announced
+    assert "ALREADY THERE" in announced
+    assert str(placed) in result.report["error"]
+
+
+def test_install_and_out_together_are_refused_because_a_run_has_one_destination(
+    tmp_path: Path,
+) -> None:
+    """Two destinations is not a question with an answer, and guessing one is the worse half.
+
+    Refused before anything is read, and refused with a report like every other outcome: a
+    caller that reads the report to find out what happened gets the reason there, not only
+    on the stream a person reads.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(parts["roles"],)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        install=True,
+        allow_stale=True,
+    )
+
+    assert result.exit_code == 7
+    assert "--install" in result.report["error"] and "--out" in result.report["error"]
+    assert not out.exists()
+
+
+def test_translation_rules_that_do_not_read_end_in_a_report_and_not_a_traceback(
+    tmp_path: Path,
+) -> None:
+    """The file is an argument, and an argument to correct is not a stack trace.
+
+    Left to itself this exits 1 -- the code for a transfer that lost something -- and says
+    nothing a caller can parse, about a run that never judged anything at all.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    broken = tmp_path / "broken.yaml"
+    broken.write_text("rules_version: 1.0\nundocumented: {}\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "convert",
+            "--agents",
+            str(parts["roles"]),
+            "--translation",
+            str(broken),
+            "--source",
+            SOURCE,
+            "--target",
+            TARGET,
+            "--specs",
+            str(root),
+            "--allow-stale",
+        ],
+    )
+    issued = json.loads(result.stdout)
+
+    assert result.exit_code == 6
+    assert issued["exit_code"] == 6
+    assert str(broken) in issued["error"]
+    assert "Traceback" not in result.stderr
+
+
+def test_a_rule_file_the_target_names_a_root_for_does_not_cost_the_run_its_verdict(
+    tmp_path: Path,
+) -> None:
+    """R19 and G02 are the transfer working, and a working transfer is not a loss.
+
+    A rule file has no format of its own to ask a description about: what decides whether it
+    crosses is whether the target names a root for rule files, and this description does --
+    the same entry the assembly puts the file at. Asked under an id no description carries,
+    the run copied the file exactly where the target says and called the transfer lossy,
+    which is the row and the place saying different things.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=(parts["policy"] / "tone.md",)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+    assert rows(result.report)["rules.project"]["target_says"] == ".agents/rules/"
+    assert (out / ".agents/rules/tone.md").exists()
+
+
+def test_a_rule_file_of_a_plugin_is_judged_by_where_it_actually_lands(tmp_path: Path) -> None:
+    """R19/G02 inside a plugin: the row must name the place the file is written to.
+
+    `_root_of` already sends a plugin's rule file to `plugin.dir.rules` rather than
+    `rules.project`/`rules.user` once a manifest names it a plugin; `_about_its_place`,
+    judging the very same file, did not know that and asked `rules.project` regardless --
+    a row naming a place the file never went to.
+    """
+    root = destinations_tree(tmp_path)
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"kind": "subagent-field", "id": entry, "support": "supported"}
+            for entry in SUBAGENT_FIELDS
+        ],
+        layout=[
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+            {"id": "rules.project", "path": ".agents/rules/"},
+            {"id": "plugins.project", "path": "<workspace-root>/.agents/plugins/"},
+            {"id": "plugin.file", "path": "<plugin-name>/plugin.json"},
+            {"id": "plugin.dir.rules", "path": "<plugin-name>/rules/"},
+        ],
+    )
+    parts = a_set_on_disk(tmp_path)
+    plugin_json = tmp_path / "kit" / "plugin.json"
+    plugin_json.parent.mkdir(parents=True, exist_ok=True)
+    plugin_json.write_text(json.dumps({"name": "kit"}), encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=MOVING, rules=(parts["policy"] / "tone.md",), plugin=plugin_json),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    rules_asset = next(a for a in result.report["assets"] if a["kind"] == "rules-file")
+    ids = {entry["id"] for entry in rules_asset["properties"]}
+    assert ids >= {"plugin.dir.rules"}
+    assert "rules.project" not in ids
+    place = next(e for e in rules_asset["properties"] if e["id"] == "plugin.dir.rules")
+    assert place["outcome"] == "reproduced" and place["verdict"] == "clean"
+    assert (out / ".agents/plugins/kit/rules/tone.md").exists()
+
+
+def test_install_refuses_a_destination_that_leads_out_of_the_home_and_the_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one promise this command makes about a caller's filesystem, on the run that can break it.
+
+    A layout path is measured from the home folder or from the workspace, and those two are
+    the roots an installing run may write under. A path measured from neither -- a target
+    description naming an absolute one, here or after a vendor edits their own -- is the
+    same refusal `--out` answers with, and this is the only place in the project where the
+    command writes into folders that are really somebody's.
+    """
+    escape = tmp_path / "escape"
+    root = destinations_tree(tmp_path, agents_root=f"{escape}/")
+    parts = a_set_on_disk(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(parts["roles"],)),
+        SOURCE,
+        TARGET,
+        root=root,
+        install=True,
+        allow_stale=True,
+    )
+
+    assert not escape.exists()
+    assert result.exit_code == 7
+
+
+def test_install_at_the_user_level_writes_under_the_home_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The branch with the widest blast radius of anything here, and it had no test at all.
+
+    The home folder is this test's own, so nothing of the machine it runs on is touched --
+    which is also the only way to have the branch run at all.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+
+    convert_set(
+        Inputs(translation=MOVING, agents=(parts["roles"],)),
+        SOURCE,
+        TARGET,
+        root=root,
+        install=True,
+        scope=Scope.USER,
+        allow_stale=True,
+    )
+
+    assert (home / ".gemini/config/agents/note-keeper.md").exists()
+
+
+def test_install_follows_a_link_the_caller_made_above_the_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Somebody keeps their configuration in a repository of its own and links the root at it.
+
+    The tree an installing run writes into is already theirs, and a link they made in it is
+    their own statement about where their configuration lives -- so the run follows it and
+    the files land where it points. What the refusal used to be was a lie as well as a stop:
+    it measured the root as written and the destination through the link, and then called a
+    path inside the home folder a path leading out of it.
+    """
+    root = destinations_tree(tmp_path)
+    parts = a_set_on_disk(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    elsewhere = tmp_path / "configs"
+    elsewhere.mkdir()
+    (home / ".gemini").symlink_to(elsewhere)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path)
+
+    result = convert_set(
+        Inputs(translation=MOVING, agents=(parts["roles"],)),
+        SOURCE,
+        TARGET,
+        root=root,
+        install=True,
+        scope=Scope.USER,
+        allow_stale=True,
+    )
+
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+    assert (elsewhere / "config/agents/note-keeper.md").exists()
+
+
+def manifest_tree(tmp_path: Path) -> Path:
+    """Descriptions where the target documents a plugin manifest and one field of one.
+
+    One field declared and the rest not: a manifest is judged field by field against the
+    descriptions, so a run that read a list of fields out of this command instead would
+    answer the same for both of them.
+    """
+    root = tmp_path / "specs"
+    write(
+        root,
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+        ],
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {"id": "skill.frontmatter.name", "support": "supported"},
+            {"id": "skill.frontmatter.description", "support": "supported"},
+            {
+                "id": "settings.file.plugin-manifest",
+                "kind": "settings-file",
+                "support": "supported",
+            },
+            {
+                "id": "settings.file.plugin-manifest.name",
+                "kind": "settings-file",
+                "support": "supported",
+            },
+        ],
+        layout=[
+            {"id": "skills.project", "path": "<workspace-root>/.agents/skills/"},
+            {"id": "skill.file", "path": "<skill-name>/SKILL.md"},
+            {"id": "plugins.project", "path": "<workspace-root>/.agents/plugins/"},
+            {"id": "plugin.file", "path": "<plugin-name>/plugin.json"},
+            {"id": "plugin.dir.skills", "path": "<plugin-name>/skills/"},
+            {"id": "plugin.file.hooks", "path": "<plugin-name>/hooks.json"},
+            {"id": "plugin.file.mcp-config", "path": "<plugin-name>/mcp_config.json"},
+        ],
+    )
+    return root
+
+
+def a_manifest(tmp_path: Path, text: str, *, skills: bool = False) -> Inputs:
+    """A composition naming a manifest, in a folder of its own -- which names the plugin."""
+    folder = tmp_path / "note-kit"
+    folder.mkdir(parents=True, exist_ok=True)
+    plugin = folder / "plugin.json"
+    plugin.write_text(text, encoding="utf-8")
+    if not skills:
+        return Inputs(translation=TRANSLATION, plugin=plugin)
+    skill(folder / "skills" / "taker", "name: taker\n")
+    return Inputs(translation=TRANSLATION, plugin=plugin, skills=(folder / "skills",))
+
+
+def test_every_field_of_a_manifest_is_a_row_and_the_descriptions_decide_which(
+    tmp_path: Path,
+) -> None:
+    """A manifest is read as data, and each of its fields is asked about under its own id.
+
+    `version` is a field of the set's own manifest that the target's format has no place
+    for, and the row saying so is the whole of FR-32 that is not silence. It is `unknown`
+    rather than `missing` because the target never said it rejects one -- and it is a row
+    at all only because the fields are asked of the descriptions one by one instead of
+    being matched against a list of names written down in this command.
+    """
+    root = manifest_tree(tmp_path)
+
+    result = convert_set(
+        a_manifest(tmp_path, json.dumps({"name": "kit", "version": "1.4.0"})),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+    found = properties(result.report)
+
+    assert found["settings.file.plugin-manifest.name"] == ("reproduced", "extension", "clean")
+    assert found["settings.file.plugin-manifest.version"] == ("unknown", "extension", "lossy")
+    assert (result.verdict, result.exit_code) == (Verdict.LOSSY, 1)
+
+
+def test_the_manifest_crosses_carrying_only_the_fields_the_target_documents(
+    tmp_path: Path,
+) -> None:
+    """The rewrite, and the one thing it must never do: invent a field or carry one blindly.
+
+    The target's own manifest format carries `name` and nothing else this manifest holds,
+    so `name` crosses and `version` does not -- and `version` is not dropped in silence, it
+    is the `unknown` row above. Which fields cross is read off those rows, so the format is
+    the description's to state and never a list of names kept in the command.
+    """
+    root = manifest_tree(tmp_path)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        a_manifest(tmp_path, json.dumps({"name": "kit", "version": "1.4.0"})),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    written = out / ".agents/plugins/note-kit/plugin.json"
+
+    assert json.loads(written.read_text(encoding="utf-8")) == {"name": "kit"}
+    assert {
+        "from": "plugin.json",
+        "to": ".agents/plugins/note-kit/plugin.json",
+        "path": str(written),
+    } in result.report["written"]
+
+
+def test_a_set_that_names_a_manifest_is_laid_out_inside_the_plugin_folder(
+    tmp_path: Path,
+) -> None:
+    """The environment finds a plugin's skills by its folder, so the skills go in it.
+
+    Without this the run would write a plugin folder holding a manifest and nothing else,
+    and the skills beside it in the root of their own kind -- an empty plugin, and the
+    parts of it loaded twice over or not as part of it at all.
+    """
+    root = manifest_tree(tmp_path)
+    out = tmp_path / "out"
+
+    result = convert_set(
+        a_manifest(tmp_path, json.dumps({"name": "kit"}), skills=True),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert (out / ".agents/plugins/note-kit/skills/taker-antigravity/SKILL.md").exists()
+    assert not (out / ".agents/skills").exists()
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_a_manifest_that_is_not_data_is_refused_with_the_file_named(tmp_path: Path) -> None:
+    """Somebody else's file, parsed here: a broken one is a refusal and never a traceback.
+
+    Named by the path, because a manifest that will not parse is the caller's file to go
+    and look at, and a stack trace names this module instead.
+    """
+    root = manifest_tree(tmp_path)
+    inputs = a_manifest(tmp_path, "name = kit\n")
+
+    result = convert_set(inputs, SOURCE, TARGET, root=root, allow_stale=True)
+
+    assert result.exit_code == 6
+    assert str(inputs.plugin) in (result.report["error"] or "")
+
+
+def test_a_field_the_transfer_leaves_out_is_not_written_into_the_manifest(
+    tmp_path: Path,
+) -> None:
+    """`out-of-scope` is clean, and clean is not the same as carried.
+
+    A field the *source* does not support is out of the transfer's scope: it cost nothing
+    precisely because nothing crosses. The target documenting a field of that name does not
+    put it back -- read off the verdict rather than the outcome, this run would write the
+    field into the manifest while its own row says it was left out of the comparison.
+    """
+    root = tmp_path / "specs"
+    write(
+        root,
+        vendor="anthropic",
+        environment="claude-code",
+        capabilities=[
+            {
+                "id": "settings.file.plugin-manifest.legacy",
+                "kind": "settings-file",
+                "support": "unsupported",
+            }
+        ],
+    )
+    write(
+        root,
+        vendor="google",
+        environment="antigravity",
+        capabilities=[
+            {
+                "id": "settings.file.plugin-manifest.name",
+                "kind": "settings-file",
+                "support": "supported",
+            },
+            {
+                "id": "settings.file.plugin-manifest.legacy",
+                "kind": "settings-file",
+                "support": "supported",
+            },
+        ],
+        layout=[
+            {"id": "plugins.project", "path": "<workspace-root>/.agents/plugins/"},
+            {"id": "plugin.file", "path": "<plugin-name>/plugin.json"},
+        ],
+    )
+    out = tmp_path / "out"
+
+    result = convert_set(
+        a_manifest(tmp_path, json.dumps({"name": "kit", "legacy": True})),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+    written = out / ".agents/plugins/note-kit/plugin.json"
+
+    assert properties(result.report)["settings.file.plugin-manifest.legacy"] == (
+        "out-of-scope",
+        "extension",
+        "clean",
+    )
+    assert json.loads(written.read_text(encoding="utf-8")) == {"name": "kit"}
+
+
+def test_the_plugin_folder_is_named_the_same_however_the_manifest_path_is_spelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The seam takes the path a caller passes, and a relative one names the same folder.
+
+    `Path("plugin.json").parent` is `.` and its name is the empty string, which would put
+    the plugin folder one level up -- every part of the set outside the plugin the run says
+    it wrote. The command line expands its arguments and so never sees this; the seam is
+    public, and a caller of it passes what they have.
+    """
+    root = manifest_tree(tmp_path)
+    inputs = a_manifest(tmp_path, json.dumps({"name": "kit"}))
+    monkeypatch.chdir(tmp_path / "note-kit")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        replace(inputs, plugin=Path("plugin.json")), SOURCE, TARGET, root=root, out=out
+    )
+
+    assert (out / ".agents/plugins/note-kit/plugin.json").exists()
+    assert result.exit_code == 0
+
+
+def test_a_plugins_own_files_beside_the_manifest_cross_into_the_plugin_folder(
+    tmp_path: Path,
+) -> None:
+    """The hooks and the MCP servers of a plugin are part of it, and part of what crosses.
+
+    The target reads both from the plugin folder and the manifest lists neither (D02), so
+    the only thing that carries them is the folder this run is already writing. Left out,
+    the set arrives as a plugin whose hooks do not fire, and the owner finds that out from
+    the behaviour -- the silence this command exists to break. Copied whole and not merged:
+    unlike a skill's hook entry, these are files of this plugin alone.
+    """
+    root = manifest_tree(tmp_path)
+    inputs = a_manifest(tmp_path, json.dumps({"name": "kit"}))
+    beside = tmp_path / "note-kit"
+    (beside / "hooks.json").write_text('{"PreToolUse": []}', encoding="utf-8")
+    (beside / "mcp_config.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+    out = tmp_path / "out"
+
+    result = convert_set(inputs, SOURCE, TARGET, root=root, out=out, allow_stale=True)
+    found = properties(result.report)
+
+    assert found["plugin.file.hooks"] == ("reproduced", "extension", "clean")
+    assert found["plugin.file.mcp-config"] == ("reproduced", "extension", "clean")
+    assert sorted(entry["to"] for entry in result.report["written"]) == [
+        ".agents/plugins/note-kit/hooks.json",
+        ".agents/plugins/note-kit/mcp_config.json",
+        ".agents/plugins/note-kit/plugin.json",
+    ]
+    assert (out / ".agents/plugins/note-kit/hooks.json").read_text(
+        encoding="utf-8"
+    ) == '{"PreToolUse": []}'
+    # Carried is not vouched for: these two files become commands on somebody else's
+    # machine, and `clean` is a verdict about the transfer and never about what is inside.
+    assert [
+        line
+        for line in result.report["advice"]
+        if "hooks.json" in line or "mcp_config.json" in line
+    ]
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+def test_a_plugin_file_the_set_does_not_hold_earns_no_row(tmp_path: Path) -> None:
+    """The target documents both files; this set holds neither, so neither is mentioned.
+
+    A row about a file that is not there is an invention, and it would tell the owner of a
+    plugin without hooks that their hooks did not cross.
+    """
+    root = manifest_tree(tmp_path)
+
+    result = convert_set(
+        a_manifest(tmp_path, json.dumps({"name": "kit"})),
+        SOURCE,
+        TARGET,
+        root=root,
+        allow_stale=True,
+    )
+
+    assert not [entry for entry in properties(result.report) if entry.startswith("plugin.file.")]
+    assert (result.verdict, result.exit_code) == (Verdict.CLEAN, 0)
+
+
+@pytest.mark.parametrize("action", ["copy", "skip"])
+def test_a_path_inside_a_bundle_obeys_the_same_rule_as_one_beside_it(
+    tmp_path: Path, action: str
+) -> None:
+    """The one rule reaches inside the skill folder too, and says so in the same words.
+
+    A file the target names no place for used to be decided by a branch of its own, which
+    never asked the rules at all: whatever they said, a bundled `README.md` stayed where it
+    was while a `README.md` one level up was carried across. Two rules for one kind of file,
+    and neither of them chosen by anybody (FR-30).
+    """
+    root = assembly_tree(tmp_path)
+    folder = skill(tmp_path / "example", "name: example\n", directories=("sandbox",))
+    (folder / "sandbox" / "toy.txt").write_text("toy\n", encoding="utf-8")
+    (folder / "README.md").write_text("# Example\n", encoding="utf-8")
+    out = tmp_path / "out"
+    translation = TRANSLATION.model_copy(
+        update={"undocumented": TRANSLATION.undocumented.model_copy(update={"action": action})}
+    )
+
+    result = convert_set(
+        Inputs(translation=translation, skill=(folder,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert (out / "example" / "README.md").exists() is (action == "copy")
+    assert (out / "example" / "sandbox" / "toy.txt").exists() is (action == "copy")
+    # Never inside the assembled skill: the target names no place for either of them, and
+    # putting them there anyway would be this run inventing the layout it refuses to guess.
+    assert not (out / ".agents/skills/example-antigravity/README.md").exists()
+    assert not (out / ".agents/skills/example-antigravity/sandbox").exists()
+    # One row apiece, in the words of the rule that decided them -- the same words a file
+    # found beside the bundle gets, because it is the same rule.
+    said = rows(result.report)
+    assert said["skill.top.README.md"]["note"] == translation.undocumented.note
+    assert said["skill.dir.sandbox"]["note"] == translation.undocumented.note

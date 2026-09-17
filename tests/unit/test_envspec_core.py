@@ -107,7 +107,6 @@ def valid_spec() -> dict[str, Any]:
         "limits": [
             {"id": "skill.file.size", "value": 15000, "unit": "bytes", "source_id": "skills-doc"}
         ],
-        "tool_names": [{"from": "Read", "to": "read_file", "source_id": "skills-doc"}],
         "invisible_sources": [
             {"id": "user-hooks", "path": "~/.claude/settings.json", "source_id": "skills-doc"}
         ],
@@ -128,8 +127,6 @@ def test_load_reads_a_valid_spec(tmp_path: Path) -> None:
     assert spec.capabilities[0].support is Support.SUPPORTED
     assert spec.capabilities[0].since_version == "2.1.246"
     assert spec.limits[0].unit == "bytes"
-    assert spec.tool_names[0].from_name == "Read"
-    assert spec.tool_names[0].to_name == "read_file"
     assert spec.layout[0].path == ".claude/skills/"
     assert spec.invisible_sources[0].path == "~/.claude/settings.json"
 

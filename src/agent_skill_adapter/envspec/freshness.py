@@ -97,6 +97,10 @@ def check(spec: EnvSpec, *, fetch: Fetch, today: date | None = None) -> list[Dis
     found: list[Discrepancy] = []
     failures: list[tuple[str, BaseException]] = []
     for source in spec.sources:
+        if source.retrieved_from == "shipped":
+            # It came with the environment, not from a page: there is nothing to re-fetch,
+            # and it changes when the environment is reinstalled, not between runs.
+            continue
         url = markdown_url(source)
         try:
             fresh = digest(section_text(fetch(url), source.anchor))

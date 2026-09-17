@@ -20,21 +20,21 @@
     }
   ],
   "counts": {
-    "reproduced": 26,
+    "reproduced": 27,
     "missing": 0,
-    "unknown": 74,
+    "unknown": 73,
     "out-of-scope": 3
   },
   "declared_by_specification": {
-    "reproduced": 6,
+    "reproduced": 7,
     "missing": 0,
-    "unknown": 4,
+    "unknown": 3,
     "out-of-scope": 3
   },
   "absent_from_target": {
     "reproduced": 0,
     "missing": 0,
-    "unknown": 11,
+    "unknown": 10,
     "out-of-scope": 0
   },
   "gaps": [
@@ -680,12 +680,12 @@
       "id": "skill.dir.references",
       "kind": "layout",
       "source_support": "supported",
-      "target_support": "unknown",
-      "outcome": "unknown",
+      "target_support": "supported",
+      "outcome": "reproduced",
       "origin": "specification",
-      "matched": false,
+      "matched": true,
       "source_note": "<skill-name>/references/",
-      "target_note": "(no matching entry in the target description)"
+      "target_note": "<skill-name>/references/"
     },
     {
       "id": "skill.dir.scripts",

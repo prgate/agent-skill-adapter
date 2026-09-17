@@ -29,6 +29,21 @@
         "support": {
           "$ref": "#/$defs/Support"
         },
+        "values": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Values"
+        },
         "since_version": {
           "anyOf": [
             {
@@ -243,6 +258,15 @@
           "minLength": 1,
           "title": "Environment Version",
           "type": "string"
+        },
+        "retrieved_from": {
+          "default": "web",
+          "enum": [
+            "web",
+            "shipped"
+          ],
+          "title": "Retrieved From",
+          "type": "string"
         }
       },
       "required": [
@@ -265,34 +289,6 @@
       ],
       "title": "Support",
       "type": "string"
-    },
-    "ToolName": {
-      "additionalProperties": false,
-      "description": "How a tool name of one environment is spelled in another.",
-      "properties": {
-        "source_id": {
-          "minLength": 1,
-          "title": "Source Id",
-          "type": "string"
-        },
-        "from": {
-          "minLength": 1,
-          "title": "From",
-          "type": "string"
-        },
-        "to": {
-          "minLength": 1,
-          "title": "To",
-          "type": "string"
-        }
-      },
-      "required": [
-        "source_id",
-        "from",
-        "to"
-      ],
-      "title": "ToolName",
-      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -373,13 +369,6 @@
         "$ref": "#/$defs/Limit"
       },
       "title": "Limits",
-      "type": "array"
-    },
-    "tool_names": {
-      "items": {
-        "$ref": "#/$defs/ToolName"
-      },
-      "title": "Tool Names",
       "type": "array"
     },
     "invisible_sources": {

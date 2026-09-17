@@ -28,9 +28,9 @@ COMMAND = "uv run python -m agent_skill_adapter.envspec.schema"
 def render() -> str:
     """:class:`EnvSpec` as a JSON Schema document, in the spelling the YAML files use.
 
-    ``by_alias`` is what makes it usable: a ``tool_names`` entry is ``from``/``to`` on disk and
-    ``from_name``/``to_name`` in Python, and a schema describing the Python names would reject
-    every file it is pointed at.
+    ``by_alias`` is what keeps it that spelling: a schema written in the Python names of
+    aliased fields would reject every file it is pointed at. No field carries an alias
+    today, and the flag is what makes the next one safe to add.
     """
     schema = {"$schema": DIALECT, **EnvSpec.model_json_schema(by_alias=True)}
     return json.dumps(schema, indent=2, ensure_ascii=False) + "\n"
