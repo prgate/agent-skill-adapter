@@ -103,7 +103,12 @@ EMPTY = (
     "part of the set that is empty is not an error, and saying so is not the same as "
     "saying nothing"
 )
-"""The four things a reading has to say about a path that produced no entity."""
+UNREADABLE = (
+    "found here but its own contents could not be listed, so this run does not know what "
+    "is inside it -- unlike the folder named in the composition, which is a refusal, a "
+    "path found while reading one is a row (ADR-0012): the rest of the set is unaffected"
+)
+"""The five things a reading has to say about a path that produced no entity."""
 
 
 class ReadError(ValueError):
@@ -203,6 +208,24 @@ def _listed(folder: Path) -> list[Path]:
         raise ReadError(f"{folder}: could not be read ({error})") from error
 
 
+def _listed_below(folder: Path, top: Path, notes: list[Finding]) -> list[Path]:
+    """``folder``'s own entries during a walk below ``top``, or ``[]`` with a row appended.
+
+    ADR-0012: a refusal is only about the path the caller named -- ``top`` itself, which
+    a folder reached by the walk on its own is not, even when it turns out unreadable
+    (permissions, a race). Losing the rest of the set over a folder nobody named directly
+    would be the very defect ADR-0012 was written against, so this earns a row the same way
+    a folder the walk will not enter for being a symbolic link does, and the walk goes on.
+    """
+    try:
+        return _listed(folder)
+    except ReadError:
+        if folder == top:
+            raise
+        notes.append(Finding(_named(folder, top), (), UNREADABLE))
+        return []
+
+
 def _named(entry: Path, root: Path) -> str:
     """How a path under ``root`` is written in a finding: relative, and a folder marked as one."""
     rel = entry.relative_to(root).as_posix()
@@ -246,7 +269,7 @@ def _files_in(folder: Path, kind: Kind, rules: Rules) -> list[Asset]:
     notes: list[Finding] = []
     pending = [folder]
     while pending:
-        for entry in _listed(pending.pop()):
+        for entry in _listed_below(pending.pop(), folder, notes):
             if rules.ignored(entry.relative_to(folder).as_posix()):
                 notes.append(Finding(_named(entry, folder), (), DROPPED))
             elif entry.is_dir() and not entry.is_symlink():
@@ -379,7 +402,7 @@ def _dropped(root: Path, rules: Rules) -> list[Finding]:
     findings: list[Finding] = []
     pending = [root]
     while pending:
-        for entry in _listed(pending.pop()):
+        for entry in _listed_below(pending.pop(), root, findings):
             if rules.ignored(entry.relative_to(root).as_posix()):
                 findings.append(Finding(_named(entry, root), (), DROPPED))
             elif entry.is_dir() and not entry.is_symlink():

@@ -314,6 +314,39 @@ def test_a_skill_file_the_filesystem_refuses_to_open_stops_the_run_the_same_way(
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 000 does not stop root from reading")
+def test_an_unreadable_folder_found_inside_a_named_skills_folder_is_a_row_not_a_refusal(
+    tmp_path: Path,
+) -> None:
+    """A bundled directory the filesystem refuses to list, found while reading `--skills`.
+
+    ADR-0012: a refusal is only about the path the caller named -- ``bundles`` itself, which
+    is readable here. What the walk finds inside a skill of it and cannot list is a row, and
+    the skill it sits in, and every other skill beside it, still convert rather than the
+    whole ``--skills`` read being lost over one folder nobody named directly.
+    """
+    root = assembly_tree(tmp_path)
+    bundles = tmp_path / "bundles"
+    folder = skill(bundles / "example", "name: example\n", directories=("scripts",))
+    locked = folder / "scripts" / "locked"
+    locked.mkdir()
+    locked.chmod(0o000)
+
+    try:
+        result = convert_set(
+            Inputs(translation=TRANSLATION, skills=(bundles,)),
+            SOURCE,
+            TARGET,
+            root=root,
+            allow_stale=True,
+        )
+    finally:
+        locked.chmod(0o755)
+
+    assert result.exit_code != 6
+    assert [asset["name"] for asset in result.report["assets"]] == ["example"]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="a mode of 000 does not stop root from reading")
 def test_a_description_that_cannot_be_read_is_blamed_on_the_description(tmp_path: Path) -> None:
     """A description nobody may read: exit code 3, and the file named is the one that failed.
 
@@ -695,6 +728,34 @@ def test_a_frontmatter_name_that_fails_the_rule_is_refused_not_substituted(
     assert result.report["written"] == []
     assert not out.exists()
     assert repr(bad_name) in result.report["error"]
+
+
+def test_an_invalid_name_inside_a_named_skills_folder_is_a_row_the_rest_of_the_set_survives(
+    tmp_path: Path,
+) -> None:
+    """A skill of a `--skills` folder with a bad name earns a row; the good skill beside it
+    still converts (ADR-0012) -- unlike a `--skill` folder named directly, which is refused.
+    """
+    root = assembly_tree(tmp_path)
+    bundles = tmp_path / "bundles"
+    skill(bundles / "Bad-Name", "name: Uppercase\n")
+    skill(bundles / "good", "name: good\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=TRANSLATION, skills=(bundles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert result.exit_code != 6
+    names = {asset["name"] for asset in result.report["assets"]}
+    assert names == {"Bad-Name", "good"}
+    assert (out / ".agents/skills/good-antigravity/SKILL.md").is_file()
+    assert not (out / ".agents/skills/Uppercase-antigravity").exists()
 
 
 def test_a_name_that_only_overflows_once_the_target_suffix_is_appended_is_refused(
@@ -1255,6 +1316,67 @@ def test_two_skills_hooks_merge_into_the_one_file_the_target_names(tmp_path: Pat
     staged = out / "hooks.json"
     assert json.loads(staged.read_text(encoding="utf-8")) == {
         "hooks": {"PreToolUse": ["alpha.sh", "beta.sh"]}
+    }
+
+
+def test_two_skills_hooks_of_the_same_event_merge_without_inventing_a_command(
+    tmp_path: Path,
+) -> None:
+    """A scalar hook value from each of two skills merges into a list, never a joined string.
+
+    `+` on two strings does not raise, so a header value the reading never required to be a
+    list was silently spliced into one command neither skill's own header wrote -- a value
+    the report then named as carried across untouched. Merging by list, whatever shape each
+    side arrived in, is what keeps the two skills' entries told apart instead.
+    """
+    root = hooks_tree(tmp_path)
+    bundles = tmp_path / "set" / "bundles"
+    skill(bundles / "alpha", "name: alpha\nhooks:\n  PreToolUse: alpha.sh\n")
+    skill(bundles / "beta", "name: beta\nhooks:\n  PreToolUse: beta.sh\n")
+    out = tmp_path / "out"
+
+    convert_set(
+        Inputs(translation=TRANSLATION, skills=(bundles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    staged = out / "hooks.json"
+    assert json.loads(staged.read_text(encoding="utf-8")) == {
+        "hooks": {"PreToolUse": ["alpha.sh", "beta.sh"]}
+    }
+
+
+def test_two_skills_hooks_of_the_same_event_merge_when_each_is_one_mapping(
+    tmp_path: Path,
+) -> None:
+    """A mapping hook value from each of two skills merges into a list rather than crashing.
+
+    `+` on two mappings raises `TypeError`, which is none of the refusals `convert` answers
+    for, so the run left as a traceback and exit 1 instead of a report and a documented code.
+    """
+    root = hooks_tree(tmp_path)
+    bundles = tmp_path / "set" / "bundles"
+    skill(bundles / "alpha", "name: alpha\nhooks:\n  PreToolUse:\n    matcher: alpha.sh\n")
+    skill(bundles / "beta", "name: beta\nhooks:\n  PreToolUse:\n    matcher: beta.sh\n")
+    out = tmp_path / "out"
+
+    result = convert_set(
+        Inputs(translation=TRANSLATION, skills=(bundles,)),
+        SOURCE,
+        TARGET,
+        root=root,
+        out=out,
+        allow_stale=True,
+    )
+
+    assert not result.report["error"]
+    staged = out / "hooks.json"
+    assert json.loads(staged.read_text(encoding="utf-8")) == {
+        "hooks": {"PreToolUse": [{"matcher": "alpha.sh"}, {"matcher": "beta.sh"}]}
     }
 
 

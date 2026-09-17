@@ -58,6 +58,9 @@ from agent_skill_adapter.assets import (
     read,
 )
 from agent_skill_adapter.assets import UNDECLARED as UNDECLARED_PATH
+from agent_skill_adapter.assets import (
+    UNREADABLE as UNREADABLE_PATH,
+)
 from agent_skill_adapter.envspec.gaps import Gap, Origin, Outcome, compare
 from agent_skill_adapter.envspec.loader import base_specs, select
 from agent_skill_adapter.envspec.model import EnvSpec, Support
@@ -165,6 +168,7 @@ ASKS_NOTHING = {
     EMPTY: Outcome.OUT_OF_SCOPE,
     UNDECLARED_PATH: Outcome.UNKNOWN,
     LINKED: Outcome.UNKNOWN,
+    UNREADABLE_PATH: Outcome.UNKNOWN,
 }
 """What a path that asks no entry amounts to, keyed by the reason the reading gives for it.
 
@@ -1842,6 +1846,18 @@ skills' hook entries silently back to colliding on the one file they share.
 """
 
 
+def _as_hook_entries(value: Any) -> list[Any]:
+    """``value`` as a list of hook entries for one event: itself, or itself alone in one.
+
+    The source documents a list of matcher entries, but this reading carries a header's
+    `hooks:` through whatever it was written as (`_portable` only asks that it have a
+    stable text, not that it have this shape), so a value that arrived as one mapping or
+    one bare string is as real an input as a list already is, and merging two skills' entries
+    must answer for both without losing which skill each one came from.
+    """
+    return value if isinstance(value, list) else [value]
+
+
 def _merged_hooks(parts: Sequence[_Part]) -> list[_Part]:
     """Every hook entry staged at the one file the target registers hooks in, collapsed to one.
 
@@ -1870,7 +1886,14 @@ def _merged_hooks(parts: Sequence[_Part]) -> list[_Part]:
         before = json.loads(earlier.content)[HOOKS_KEY]  # type: ignore[arg-type]
         combined = {**before}
         for event, entries in carried.items():
-            combined[event] = combined.get(event, []) + entries
+            # Each side is a list of matcher entries in the shape the source documents, but
+            # nothing upstream of here enforces that shape on a header the reading only
+            # carries through `_portable` -- and `+` on two of anything else is either a
+            # crash (two mappings) or a string built out of two commands nobody wrote (two
+            # scalars), neither of which this run may hand to the target as one entry. Each
+            # side is wrapped in a list of its own first, so two events combine into a list
+            # of the two original values however each was shaped, and never into their sum.
+            combined[event] = _as_hook_entries(combined.get(event, [])) + _as_hook_entries(entries)
         merged[part.staged] = replace(
             earlier, content=json.dumps({HOOKS_KEY: combined}, indent=2, ensure_ascii=False) + "\n"
         )
@@ -2821,6 +2844,7 @@ def _assess(
     translation: Rules,
     scope: Scope,
     plugin: str | None,
+    named_directly: frozenset[Path],
 ) -> tuple[Assessed, list[str]]:
     """One entity of the set: its rows, its own verdict, and the lines it owes the reader.
 
@@ -2859,15 +2883,29 @@ def _assess(
     if not asset.name:
         pass
     elif asset.kind is Kind.SKILL:
-        name = _skill_name(asset.path, asset.frontmatter)
-        # The whole skill having nowhere to go, and one part of it left behind, are asked in
-        # that order and never both: a target that names no root has nothing to say about
-        # where the parts inside it would have gone either.
-        stayed = _nowhere(target, asset.kind, scope, plugin)
-        if not stayed:
-            assembled = _assembled_name(name, target.environment)
-            stayed = _unregistered_hook(target, scope, properties, _hooks_of(asset))
-            unplaced = bool(_placeless(target, properties))
+        try:
+            name = _skill_name(asset.path, asset.frontmatter)
+        except ConvertError as error:
+            if Path(os.path.abspath(asset.path)) in named_directly:
+                # ADR-0012: a refusal is about the path the caller named, and this is it --
+                # a `--skill` folder the command line pointed at directly, not one this run
+                # found on its own. Re-raised whole, and caught by `convert`'s own refusal.
+                raise
+            # Found inside a folder the caller named rather than named itself, so an invalid
+            # name is a fault of this one skill and not of the folder it was found in:
+            # refusing the whole `--skills` read over it would lose every skill beside it
+            # that named itself correctly. A row instead, the same price a target with no
+            # root for skills at all already pays below.
+            stayed = [str(error)]
+        else:
+            # The whole skill having nowhere to go, and one part of it left behind, are
+            # asked in that order and never both: a target that names no root has nothing
+            # to say about where the parts inside it would have gone either.
+            stayed = _nowhere(target, asset.kind, scope, plugin)
+            if not stayed:
+                assembled = _assembled_name(name, target.environment)
+                stayed = _unregistered_hook(target, scope, properties, _hooks_of(asset))
+                unplaced = bool(_placeless(target, properties))
     elif asset.kind is Kind.MANIFEST:
         stayed = _nowhere(target, asset.kind, scope, plugin)
         # The folder the manifest sits in, which is what the target reads a plugin by: its
@@ -2987,8 +3025,11 @@ def convert(
             ),
             None,
         )
+        named_directly = frozenset(Path(os.path.abspath(path)) for path in inputs.skill)
         for asset in found:
-            entity, said = _assess(asset, gaps, target_spec, inputs.translation, scope, plugin)
+            entity, said = _assess(
+                asset, gaps, target_spec, inputs.translation, scope, plugin, named_directly
+            )
             assessed.append(entity)
             advice += said
         verdict = worst(entity.verdict for entity in assessed)
